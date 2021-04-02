@@ -42,7 +42,7 @@ FTP_DEBIAN = "https://ftp.debian.org"
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
 MAX_RETRY_WAIT = 30
-MAX_RETRY_STOP = 5
+MAX_RETRY_STOP = 20
 
 MAX_RETRY_RESUME_WAIT = 5
 MAX_RETRY_RESUME_STOP = 1000  # this is clearly bruteforce but we have no choice
