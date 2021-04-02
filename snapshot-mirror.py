@@ -478,7 +478,7 @@ def main():
             architectures=args.arch,
         )
         cli.run(check_only=args.check_only, no_clean=args.no_clean_part_file)
-    except (ValueError, SnapshotMirrorException) as e:
+    except (ValueError, SnapshotMirrorException, KeyboardInterrupt) as e:
         logger.error(str(e))
         return 1
 
