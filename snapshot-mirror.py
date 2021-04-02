@@ -41,8 +41,8 @@ SNAPSHOT_DEBIAN = "https://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
-MAX_RETRY_WAIT = 15
-MAX_RETRY_STOP = 3
+MAX_RETRY_WAIT = 30
+MAX_RETRY_STOP = 5
 
 MAX_RETRY_RESUME_WAIT = 5
 MAX_RETRY_RESUME_STOP = 1000  # this is clearly bruteforce but we have no choice
@@ -67,6 +67,7 @@ def parse_ts(ts):
     retry=(
         retry_if_exception_type(httpx.HTTPError) |
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
+        retry_if_exception_type(http.client.HTTPException) |
         retry_if_exception_type(ssl.SSLError)
     ),
     wait=wait_fixed(MAX_RETRY_WAIT),
@@ -75,6 +76,7 @@ def parse_ts(ts):
 def download_with_retry(url, path, sha256=None, no_clean=False):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     client = httpx.Client()
+    fname = os.path.basename(url)
     try:
         with client.stream("GET", url) as resp:
             resp.raise_for_status()
@@ -83,8 +85,8 @@ def download_with_retry(url, path, sha256=None, no_clean=False):
                 for chunk in resp.iter_raw():
                     out_file.write(chunk)
     except Exception as e:
-        logger.error(str(e))
-        raise
+        logger.debug(f"{fname}: retrying ({download_with_retry.retry.statistics['attempt_number']}/{MAX_RETRY_STOP}): {str(e)}")
+        raise http.client.HTTPException
     tmp_sha256 = sha256sum(tmp_path)
     if sha256 and tmp_sha256 != sha256:
         # if not no_clean:
