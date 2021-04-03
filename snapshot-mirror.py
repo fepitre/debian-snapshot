@@ -144,7 +144,7 @@ class SnapshotMirrorException(Exception):
     pass
 
 
-class Package:
+class File:
     def __init__(self, name, version, architecture, archive, timestamp, suite, component, size, sha256, url):
         self.name = name
         self.version = version
@@ -213,11 +213,11 @@ class SnapshotMirrorCli:
             timestamps = self.get_timestamps_from_metasnap(archive)
         return timestamps
 
-    def get_packages(self, archive, timestamp, suite, component, arch):
+    def get_files(self, archive, timestamp, suite, component, arch):
         """"
-        Get a parsed packages list from Packages.gz repository file
+        Get a parsed files list from Packages.gz or Sources.gz repository file
         """
-        packages = []
+        files = []
         if arch == "source":
             repodata = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"
         else:
@@ -228,7 +228,7 @@ class SnapshotMirrorCli:
                     for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
                         for src_file in raw_pkg["Checksums-Sha256"]:
                             # f"{FTP_DEBIAN}/{archive}/{raw_pkg['Directory']}/{src_file['name']}",
-                            pkg = Package(
+                            pkg = File(
                                 name=raw_pkg["Package"],
                                 version=raw_pkg["Version"],
                                 architecture="source",
@@ -242,11 +242,11 @@ class SnapshotMirrorCli:
                                     f"{SNAPSHOT_DEBIAN}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
                                 ]
                             )
-                            packages.append(pkg)
+                            files.append(pkg)
                 else:
                     for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
                         url = f"{SNAPSHOT_DEBIAN}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
-                        pkg = Package(
+                        pkg = File(
                             name=raw_pkg["Package"],
                             version=raw_pkg["Version"],
                             architecture=raw_pkg["Architecture"],
@@ -258,10 +258,10 @@ class SnapshotMirrorCli:
                             sha256=raw_pkg["SHA256"],
                             url=[url],
                         )
-                        packages.append(pkg)
+                        files.append(pkg)
         except Exception as e:
             logger.error(str(e))
-        return packages
+        return files
 
     def download(self, url, sha256=None, size=None, no_clean=False):
         """
@@ -283,7 +283,7 @@ class SnapshotMirrorCli:
                     else:
                         download_with_retry_and_resume(url, fname_sha256, sha256=sha256, no_clean=no_clean)
                 except Exception as e:
-                    raise SnapshotMirrorException(f"Failed to download package: {str(e)}")
+                    raise SnapshotMirrorException(f"Failed to download file: {str(e)}")
         else:
             if os.path.exists(fname):
                 return
@@ -311,10 +311,10 @@ class SnapshotMirrorCli:
         Download Packages.gz or Sources.gz
         """
         if arch == "source":
-            packages = f"{arch}/Sources.gz"
+            repodata = f"{arch}/Sources.gz"
         else:
-            packages = f"binary-{arch}/Packages.gz"
-        f = f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{packages}"
+            repodata = f"binary-{arch}/Packages.gz"
+        f = f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{repodata}"
         localfile = self.localdir + f
         remotefile = f"{SNAPSHOT_DEBIAN}{f}"
         logger.debug(remotefile)
@@ -342,21 +342,21 @@ class SnapshotMirrorCli:
                 continue
             self.download(remotefile)
 
-    def download_package(self, package, check_only, no_clean):
-        logger.info(package)
+    def download_file(self, file, check_only, no_clean):
+        logger.info(file)
         if check_only:
-            fname_sha256 = f"{self.localdir}/by-hash/SHA256/{package.sha256}"
+            fname_sha256 = f"{self.localdir}/by-hash/SHA256/{file.sha256}"
             if not os.path.exists(fname_sha256):
-                logger.info(f"MISSING: {package}")
+                logger.info(f"MISSING: {file}")
                 return
-            if sha256sum(fname_sha256) != package.sha256:
+            if sha256sum(fname_sha256) != file.sha256:
                 raise SnapshotMirrorException(
                     f"Wrong SHA256 for: {fname_sha256}")
         else:
             result = None
-            for url in package.url:
+            for url in file.url:
                 try:
-                    result = self.download(url, package.sha256, size=package.size, no_clean=no_clean)
+                    result = self.download(url, file.sha256, size=file.size, no_clean=no_clean)
                     break
                 except Exception as e:
                     logger.debug(f"Try with another URL ({str(e)})")
@@ -375,9 +375,8 @@ class SnapshotMirrorCli:
                     for component in self.components:
                         for arch in self.architectures:
                             self.download_repodata(archive, timestamp, suite, component, arch)
-                            packages = self.get_packages(archive, timestamp, suite, component, arch)
-                            for package in packages:
-                                self.download_package(package, check_only=check_only, no_clean=no_clean)
+                            for file in self.get_files(archive, timestamp, suite, component, arch):
+                                self.download_file(file, check_only=check_only, no_clean=no_clean)
                             # We download Release files at the end to ack
                             # the mirror sync. It is for helping rebuilders
                             # checking available mirrors.
@@ -429,12 +428,12 @@ def get_args():
     parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Check downloaded packages.",
+        help="Check downloaded files.",
     )
     parser.add_argument(
         "--no-clean-part-file",
         action="store_true",
-        help="No clean partially downloaded packages.",
+        help="No clean partially downloaded files.",
     )
     parser.add_argument(
         "--verbose",

@@ -4,8 +4,8 @@ SnapshotMirror
 Create a local mirror of [snapshot.debian.org](snapshot.debian.org).
 
 ```
-usage: snapshot-mirror.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH] [--timestamp TIMESTAMP]
-                          [--check-only] [--no-clean-part-file] [--verbose] [--debug]
+usage: snapshot-mirror.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH]
+                          [--timestamp TIMESTAMP] [--check-only] [--no-clean-part-file] [--verbose] [--debug]
                           local_directory
 
 positional arguments:
@@ -19,14 +19,14 @@ optional arguments:
                         Debian component to mirror. Default is 'main'
   --arch ARCH           Debian arch to mirror. Can be used multiple times.
   --timestamp TIMESTAMP
-                        Snapshot timestamp to mirror. Can be used multiple times. Default is all the available timestamps. Timestamps range
-                        can be expressed with ':' separator. Empty boundary is allowed and and this case, it would use the lower or upper
-                        value in all the available timestamps. For example: '20200101T000000Z:20210315T085036Z', '20200101T000000Z:' or
-                        ':20100101T000000Z'.
-  --check-only          Check downloaded packages.
-  --no-clean-part-file  No clean partially downloaded packages.
+                        Snapshot timestamp to mirror. Can be used multiple times. Default is all the available
+                        timestamps. Timestamps range can be expressed with ':' separator. Empty boundary is allowed
+                        and and this case, it would use the lower or upper value in all the available timestamps. For
+                        example: '20200101T000000Z:20210315T085036Z', '20200101T000000Z:' or ':20100101T000000Z'.
+  --check-only          Check downloaded files.
+  --no-clean-part-file  No clean partially downloaded files.
   --verbose             Display logger info messages.
-  --debug               Display logger debug messages
+  --debug               Display logger debug messages.
 ```
 
 ### Examples
