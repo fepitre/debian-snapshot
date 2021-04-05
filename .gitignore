@@ -1,2 +1,5 @@
 .idea
 __pycache__
+timestamps_*.txt
+snapshot.db
+test.py

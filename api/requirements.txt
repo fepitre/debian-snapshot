@@ -1,0 +1,4 @@
+flask
+flask_caching
+requests
+gunicorn
