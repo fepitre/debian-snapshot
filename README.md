@@ -3,6 +3,8 @@ SnapshotMirror
 
 Create a local mirror of [snapshot.debian.org](snapshot.debian.org).
 
+## Mirroring
+
 ```
 usage: snapshot-mirror.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH]
                           [--timestamp TIMESTAMP] [--check-only] [--no-clean-part-file] [--verbose] [--debug]
@@ -24,6 +26,7 @@ optional arguments:
                         and and this case, it would use the lower or upper value in all the available timestamps. For
                         example: '20200101T000000Z:20210315T085036Z', '20200101T000000Z:' or ':20100101T000000Z'.
   --check-only          Check downloaded files.
+  --provision-db        Provision database.
   --no-clean-part-file  No clean partially downloaded files.
   --verbose             Display logger info messages.
   --debug               Display logger debug messages.
@@ -59,3 +62,47 @@ limit_rate 10m;
 ```
 
 This is for allowing every Debian rebuilder infrastructure to scale their actual builders.
+
+## API
+
+The mirroring process extracts and stores repository metadata information (`Sources.gz` and `Packages.gz`) into a database.
+From it, we expose a machine-readable output API similar to [snapshot.debian.org](https://salsa.debian.org/snapshot-team/snapshot/-/raw/master/API).
+
+We currently expose the following similar endpoints:
+```
+URL: /mr/package
+HTTP status codes: 200 404 500
+Summary: list source package names
+
+URL: /mr/package/<package>
+HTTP status codes: 200 404 500
+Summary: list all available source versions for this package
+
+URL: /mr/package/<package>/<version>/srcfiles
+Options: fileinfo=1 includes fileinfo section
+HTTP status codes: 200 404 500
+Summary: list all files associated with a source package
+
+URL: /mr/binary/<package>
+HTTP status codes: 200 404 500
+Summary: list all available binary versions for this package
+
+URL: /mr/binary/<package>/<version>/binfiles
+Options: fileinfo=1 includes fileinfo section
+HTTP status codes: 200 404 500
+Summary: list all files associated with a binary package
+
+URL: /mr/file
+http status codes: 200 404 500
+Summary: list all files
+
+URL: /mr/file/<sha256>/info
+http status codes: 200 404 500
+Summary: information about file
+
+URL: /mr/timestamp
+http status codes: 200 404 500
+Summary: list all timestamps
+```
+
+>Note: Contrary to `snapshot.debian.org`, we only use `SHA256`.

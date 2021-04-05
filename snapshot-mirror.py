@@ -20,7 +20,6 @@
 import argparse
 import debian.deb822
 import datetime
-import gzip
 import hashlib
 import logging
 import os
@@ -36,6 +35,8 @@ import urllib.error
 import urllib.request
 import http.client
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
+from dateutil.parser import parse as parsedate
+from api.db import DBrepodata, DBtimestamp, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
 
 SNAPSHOT_DEBIAN = "https://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
@@ -61,6 +62,10 @@ def sha256sum(fname):
 
 def parse_ts(ts):
     return datetime.datetime.strptime(ts, TS_FORMAT)
+
+
+def append_to_str(orig, new):
+    return ','.join(sorted(set(orig.split(',') + [new])))
 
 
 @retry(
@@ -173,6 +178,150 @@ class SnapshotMirrorCli:
         if not os.path.exists(self.localdir):
             raise SnapshotMirrorException(f"Cannot find: {self.localdir}")
 
+    def provision_database(self, archive, timestamp, suites, components, arches):
+        session = db_create_session()
+        to_add = []
+        files = {}
+
+        logger.info(f"Provision database for timestamp: {timestamp}")
+        # we convert timestamp to a SQL format
+        parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
+        db_timestamp = session.query(DBtimestamp).get(parsed_ts)
+        if db_timestamp:
+            session.close()
+            return
+
+        db_timestamp = DBtimestamp(value=parsed_ts)
+
+        for suite in suites:
+            for component in components:
+                for arch in arches:
+                    if arch == "source":
+                        packages = f"{arch}/Sources.gz"
+                    else:
+                        packages = f"binary-{arch}/Packages.gz"
+                    repodata = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/{packages}"
+                    repodata_path = f"{self.localdir}/{repodata}"
+                    logger.debug(f"Processing {repodata_path}")
+
+                    # Check if we already provisioned DB with
+                    repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
+                    if session.query(DBrepodata).get(repodata_id):
+                        session.close()
+                        continue
+                    with open(repodata_path) as fd:
+                        if arch == "source":
+                            for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
+                                # print(raw_pkg['Package'])
+                                for src_file in raw_pkg["Checksums-Sha256"]:
+                                    if not files.get(src_file['sha256'], None):
+                                        db_file = DBtempfile(
+                                            sha256=src_file['sha256'],
+                                            size=int(src_file['size']),
+                                            name=src_file['name'],
+                                            archive_name=archive,
+                                            path="/" + raw_pkg['Directory'],
+                                            timestamp_value=parsed_ts
+                                        )
+                                        files[src_file['sha256']] = db_file
+                                    db_srcpkg = DBtempsrcpkg(
+                                        name=raw_pkg['Package'],
+                                        version=raw_pkg['Version'],
+                                        file_sha256=src_file["sha256"])
+                                    to_add.append(db_srcpkg)
+                        else:
+                            for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
+                                if not files.get(raw_pkg['SHA256'], None):
+                                    db_file = DBtempfile(
+                                        sha256=raw_pkg['SHA256'],
+                                        size=int(raw_pkg['Size']),
+                                        name=os.path.basename(raw_pkg['Filename']),
+                                        archive_name=archive,
+                                        path="/" + os.path.dirname(raw_pkg['Filename']),
+                                        timestamp_value=parsed_ts
+                                    )
+                                    files[raw_pkg['SHA256']] = db_file
+                                db_binpkg = DBtempbinpkg(
+                                    name=raw_pkg['Package'],
+                                    version=raw_pkg['Version'],
+                                    file_sha256=raw_pkg["SHA256"],
+                                    architecture=raw_pkg['Architecture'])
+                                to_add.append(db_binpkg)
+
+                    session.add(DBrepodata(id=repodata_id))
+
+        logger.debug(f"Commit to DB")
+        session.add_all(list(files.values()) + to_add)
+        session.commit()
+
+        stmt_insert_new_file = """
+        INSERT INTO files (sha256, size, name, archive_name, path, first_seen, last_seen)
+        SELECT t.sha256, t.size, t.name, t.archive_name, t.path, t.timestamp_value, t.timestamp_value FROM tempfiles t
+        ON CONFLICT DO NOTHING
+        """
+        session.execute(stmt_insert_new_file)
+        session.commit()
+
+        stmt_file_update_first_seen = """
+        UPDATE files AS f
+        SET first_seen= t.min_time
+        FROM (SELECT sha256, min(timestamp_value) as min_time FROM tempfiles GROUP BY sha256) AS t
+        WHERE f.sha256 = t.sha256 AND (min_time < f.first_seen OR f.first_seen is NULL)
+        """
+        session.execute(stmt_file_update_first_seen)
+        session.commit()
+
+        stmt_file_update_last_seen = """
+        UPDATE files AS f
+        SET last_seen = t.max_time
+        FROM (SELECT sha256, max(timestamp_value) as max_time FROM tempfiles GROUP BY sha256) AS t
+        WHERE f.sha256 = t.sha256 AND (max_time > f.last_seen OR f.last_seen is NULL)
+        """
+        session.execute(stmt_file_update_last_seen)
+        session.commit()
+
+        if "source" in arches:
+            stmt_insert_new_srcpkg = """
+            INSERT INTO srcpkg (name, version)
+            SELECT t.name, t.version FROM tempsrcpkg t
+            ON CONFLICT DO NOTHING
+            """
+            session.execute(stmt_insert_new_srcpkg)
+            session.commit()
+
+            stmt_append_new_file_to_srcpkg = """
+            INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
+            SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
+            ON CONFLICT DO NOTHING
+            """
+            session.execute(stmt_append_new_file_to_srcpkg)
+            session.commit()
+
+        if len([arch for arch in arches if arch != "source"]) > 0:
+            stmt_insert_new_binpkg = """
+            INSERT INTO binpkg (name, version)
+            SELECT t.name, t.version FROM tempbinpkg t
+            ON CONFLICT DO NOTHING
+            """
+            session.execute(stmt_insert_new_binpkg)
+            session.commit()
+
+            stmt_append_new_file_to_binpkg = """
+            INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
+            SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
+            ON CONFLICT DO NOTHING
+            """
+            session.execute(stmt_append_new_file_to_binpkg)
+            session.commit()
+
+        session.add(db_timestamp)
+        session.commit()
+        session.close()
+
+        DBtempfile.__table__.drop()
+        DBtempsrcpkg.__table__.drop()
+        DBtempbinpkg.__table__.drop()
+
     @staticmethod
     def get_timestamps_from_metasnap(archive):
         """
@@ -194,6 +343,7 @@ class SnapshotMirrorCli:
         Get timestamps to use
         """
         timestamps = []
+        logger.debug("Get timestamps to use")
         if self.timestamps:
             if ':' in self.timestamps[0]:
                 all_timestamps = self.get_timestamps_from_metasnap(archive)
@@ -223,7 +373,7 @@ class SnapshotMirrorCli:
         else:
             repodata = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz"
         try:
-            with gzip.open(repodata) as fd:
+            with open(repodata) as fd:
                 if arch == "source":
                     for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
                         for src_file in raw_pkg["Checksums-Sha256"]:
@@ -363,7 +513,7 @@ class SnapshotMirrorCli:
             if not result:
                 raise SnapshotMirrorException("No more URL to try")
 
-    def run(self, check_only=False, no_clean=False):
+    def run(self, check_only=False, no_clean=False, provision_db=False):
         """
         Run the snapshot mirroring on all the archives, timestamps, suites,
         components and architectures
@@ -371,16 +521,22 @@ class SnapshotMirrorCli:
         os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
         for archive in self.archives:
             for timestamp in self.get_timestamps(archive):
-                for suite in self.suites:
-                    for component in self.components:
-                        for arch in self.architectures:
-                            self.download_repodata(archive, timestamp, suite, component, arch)
-                            for file in self.get_files(archive, timestamp, suite, component, arch):
-                                self.download_file(file, check_only=check_only, no_clean=no_clean)
-                            # We download Release files at the end to ack
-                            # the mirror sync. It is for helping rebuilders
-                            # checking available mirrors.
-                            self.download_release(archive, timestamp, suite, component, arch)
+                # Provision database
+                if provision_db:
+                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures)
+                else:
+                    for suite in self.suites:
+                        for component in self.components:
+                            for arch in self.architectures:
+                                # Download repository metadata
+                                self.download_repodata(archive, timestamp, suite, component, arch)
+                                # Download repository files
+                                for file in self.get_files(archive, timestamp, suite, component, arch):
+                                    self.download_file(file, check_only=check_only, no_clean=no_clean)
+                                # We download Release files at the end to ack
+                                # the mirror sync. It is for helping rebuilders
+                                # checking available mirrors.
+                                self.download_release(archive, timestamp, suite, component, arch)
 
 
 def get_args():
@@ -428,7 +584,12 @@ def get_args():
     parser.add_argument(
         "--check-only",
         action="store_true",
-        help="Check downloaded files.",
+        help="Check downloaded files only.",
+    )
+    parser.add_argument(
+        "--provision-db",
+        action="store_true",
+        help="Provision database.",
     )
     parser.add_argument(
         "--no-clean-part-file",
@@ -478,7 +639,8 @@ def main():
             components=args.component,
             architectures=args.arch,
         )
-        cli.run(check_only=args.check_only, no_clean=args.no_clean_part_file)
+        cli.run(check_only=args.check_only, no_clean=args.no_clean_part_file,
+                provision_db=args.provision_db)
     except (ValueError, SnapshotMirrorException, KeyboardInterrupt) as e:
         logger.error(str(e))
         return 1
