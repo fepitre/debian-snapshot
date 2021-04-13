@@ -106,3 +106,12 @@ Summary: list all timestamps
 ```
 
 >Note: Contrary to `snapshot.debian.org`, we only use `SHA256`.
+
+## Archives from other distributions
+
+### QubesOS
+
+We include the support for mirroring the [multi-versions](https://deb.qubes-os.org/all-versions) repository of QubesOS.
+On this repository, we can find the QubesOS packages for `bullseye` and `buster`. As there is not strictly speaking `snapshots`
+but a repository having multiple versions for packages, we reference the unique timestamp as `99990101T000000Z`.
+Archives are named as `qubes-rX.Y-vm` where `rX.Y` references the Qubes release and `vm` is the Qubes `package-set`.

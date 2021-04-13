@@ -14,6 +14,7 @@ flock -n "$lock_fd" || { echo "ERROR: flock() failed." >&2; exit 1; }
 if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
     /home/user/snapshot-mirror/snapshot-mirror.py "$SNAPSHOT_MOUNTPOINT" \
         --debug --no-clean-part-file \
+        --archive debian --archive qubes-r4.1-vm \
         --suite unstable --suite bullseye \
         --arch amd64 --arch all --arch source \
         --timestamp "${LOWER_TIMESTAMP}": \

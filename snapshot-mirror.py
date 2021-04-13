@@ -42,6 +42,14 @@ SNAPSHOT_DEBIAN = "https://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
+SNAPSHOT_QUBES = "https://deb.qubes-os.org/all-versions"
+
+# Supported Debian archives
+DEBIAN_ARCHIVES = {"debian"}
+
+# Supported QubesOS archives
+QUBES_ARCHIVES = {"qubes-r4.1-vm"}
+
 MAX_RETRY_WAIT = 30
 MAX_RETRY_STOP = 20
 
@@ -314,8 +322,9 @@ class SnapshotMirrorCli:
             session.execute(stmt_append_new_file_to_binpkg)
             session.commit()
 
-        session.add(db_timestamp)
-        session.commit()
+        if timestamp != "99990101T000000Z":
+            session.add(db_timestamp)
+            session.commit()
         session.close()
 
         DBtempfile.__table__.drop()
@@ -363,7 +372,7 @@ class SnapshotMirrorCli:
             timestamps = self.get_timestamps_from_metasnap(archive)
         return timestamps
 
-    def get_files(self, archive, timestamp, suite, component, arch):
+    def get_files(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
         """"
         Get a parsed files list from Packages.gz or Sources.gz repository file
         """
@@ -389,13 +398,13 @@ class SnapshotMirrorCli:
                                 size=src_file["size"],
                                 sha256=src_file["sha256"],
                                 url=[
-                                    f"{SNAPSHOT_DEBIAN}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
+                                    f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
                                 ]
                             )
                             files.append(pkg)
                 else:
                     for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                        url = f"{SNAPSHOT_DEBIAN}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
+                        url = f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
                         pkg = File(
                             name=raw_pkg["Package"],
                             version=raw_pkg["Version"],
@@ -419,7 +428,7 @@ class SnapshotMirrorCli:
         """
         # If SHA256 sum is given (DEB files) we use it else we compute it
         # after download (Packages.gz, i18n etc.).
-        fname = f"{self.localdir}/{url.replace(SNAPSHOT_DEBIAN, '').replace(FTP_DEBIAN, '')}"
+        fname = f"{self.localdir}/{url.replace(SNAPSHOT_DEBIAN, '').replace(FTP_DEBIAN, '').replace(SNAPSHOT_QUBES, '')}"
         if sha256:
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{sha256}"
             already_downloaded = False
@@ -456,7 +465,7 @@ class SnapshotMirrorCli:
 
         return fname
 
-    def download_repodata(self, archive, timestamp, suite, component, arch):
+    def download_repodata(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
         """
         Download Packages.gz or Sources.gz
         """
@@ -466,12 +475,12 @@ class SnapshotMirrorCli:
             repodata = f"binary-{arch}/Packages.gz"
         f = f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{repodata}"
         localfile = self.localdir + f
-        remotefile = f"{SNAPSHOT_DEBIAN}{f}"
+        remotefile = f"{baseurl}{f}"
         logger.debug(remotefile)
         if not os.path.exists(localfile):
             self.download(remotefile)
 
-    def download_release(self, archive, timestamp, suite, component, arch):
+    def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
         """
         Download repository Release files and translation
         """
@@ -481,10 +490,24 @@ class SnapshotMirrorCli:
             f"/archive/{archive}/{timestamp}/dists/{suite}/Release",
             f"/archive/{archive}/{timestamp}/dists/{suite}/Release.gpg",
             f"/archive/{archive}/{timestamp}/dists/{suite}/InRelease",
-            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Release",
-            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n/Translation-en.bz2"
+            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Release"
         ]
         for f in metadata_files:
+            localfile = self.localdir + f
+            remotefile = f"{baseurl}{f}"
+            logger.debug(remotefile)
+            if os.path.exists(localfile):
+                continue
+            self.download(remotefile)
+
+    def download_translation(self, archive, timestamp, suite, component):
+        """
+        Download repository Translation files
+        """
+        translation_files = [
+            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n/Translation-en.bz2"
+        ]
+        for f in translation_files:
             localfile = self.localdir + f
             remotefile = f"{SNAPSHOT_DEBIAN}{f}"
             logger.debug(remotefile)
@@ -519,7 +542,8 @@ class SnapshotMirrorCli:
         components and architectures
         """
         os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
-        for archive in self.archives:
+        archives = set(self.archives).intersection(DEBIAN_ARCHIVES)
+        for archive in archives:
             for timestamp in self.get_timestamps(archive):
                 # Provision database
                 if provision_db:
@@ -530,6 +554,7 @@ class SnapshotMirrorCli:
                             for arch in self.architectures:
                                 # Download repository metadata
                                 self.download_repodata(archive, timestamp, suite, component, arch)
+                                self.download_translation(archive, timestamp, suite, component)
                                 # Download repository files
                                 for file in self.get_files(archive, timestamp, suite, component, arch):
                                     self.download_file(file, check_only=check_only, no_clean=no_clean)
@@ -537,6 +562,31 @@ class SnapshotMirrorCli:
                                 # the mirror sync. It is for helping rebuilders
                                 # checking available mirrors.
                                 self.download_release(archive, timestamp, suite, component, arch)
+
+    def run_qubes(self, check_only=False, no_clean=False, provision_db=False):
+        """
+        Run the mirroring of Qubes all-versions repository
+        """
+        os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
+        archives = set(self.archives).intersection(QUBES_ARCHIVES)
+        timestamps = ["99990101T000000Z"]
+        suites = ["bullseye"]
+        components = ["main"]
+        architectures = ["amd64", "source"]
+
+        for archive in archives:
+            for timestamp in timestamps:
+                # Provision database
+                if provision_db:
+                    self.provision_database(archive, timestamp, suites, components, architectures)
+                else:
+                    for suite in suites:
+                        for component in components:
+                            for arch in architectures:
+                                self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
+                                for file in self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES):
+                                    self.download_file(file, check_only=check_only, no_clean=no_clean)
+                                self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
 
 
 def get_args():
@@ -639,8 +689,18 @@ def main():
             components=args.component,
             architectures=args.arch,
         )
-        cli.run(check_only=args.check_only, no_clean=args.no_clean_part_file,
-                provision_db=args.provision_db)
+        # Debian: snapshot.debian.org
+        cli.run(
+            check_only=args.check_only,
+            no_clean=args.no_clean_part_file,
+            provision_db=args.provision_db
+        )
+        # QubesOS: deb.qubes-os.org/all-versions
+        cli.run_qubes(
+            check_only=args.check_only,
+            no_clean=args.no_clean_part_file,
+            provision_db=args.provision_db
+        )
     except (ValueError, SnapshotMirrorException, KeyboardInterrupt) as e:
         logger.error(str(e))
         return 1

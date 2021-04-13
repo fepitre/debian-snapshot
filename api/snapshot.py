@@ -237,18 +237,18 @@ def binfiles(pkg_name, pkg_ver):
     fileinfo = request.args.get('fileinfo')
     try:
         session = db_create_session(readonly=True)
-        binpackages = session.query(DBbinpkg).filter_by(name=pkg_name, version=pkg_ver).first()
-        if not list(binpackages):
+        binpackage = session.query(DBbinpkg).filter_by(name=pkg_name, version=pkg_ver).first()
+        if not binpackage:
             raise SnapshotEmptyQueryException
         status_code = 200
         api_result.update({
             "binary_version": pkg_ver,
             "binary": pkg_name,
-            "result": [{"hash": associated_file.file_sha256, "architecture": associated_file.architecture} for associated_file in binpackages.files],
+            "result": [{"hash": associated_file.file_sha256, "architecture": associated_file.architecture} for associated_file in binpackage.files],
         })
         if fileinfo == "1":
             api_result["fileinfo"] = {}
-            for associated_file in binpackages.files:
+            for associated_file in binpackage.files:
                 file = associated_file.file
                 api_result["fileinfo"][file.sha256] = [file_desc(file)]
     except SnapshotEmptyQueryException:
