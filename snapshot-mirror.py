@@ -472,7 +472,7 @@ class SnapshotMirrorCli:
 
         return fname
 
-    def download_repodata(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
+    def download_repodata(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
         """
         Download Packages.gz or Sources.gz
         """
@@ -486,10 +486,11 @@ class SnapshotMirrorCli:
         logger.debug(remotefile)
         if not requests.head(remotefile).ok:
             raise SnapshotMirrorRepodataNotFoundException(f)
-        if not os.path.exists(localfile):
-            self.download(remotefile)
+        if os.path.exists(localfile) and force:
+            os.remove(localfile)
+        self.download(remotefile)
 
-    def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
+    def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
         """
         Download repository Release files and translation
         """
@@ -505,8 +506,8 @@ class SnapshotMirrorCli:
             localfile = self.localdir + f
             remotefile = f"{baseurl}{f}"
             logger.debug(remotefile)
-            if os.path.exists(localfile):
-                continue
+            if os.path.exists(localfile) and force:
+                os.remove(localfile)
             self.download(remotefile)
 
     def download_translation(self, archive, timestamp, suite, component):
@@ -595,7 +596,7 @@ class SnapshotMirrorCli:
                     for suite in suites:
                         for component in components:
                             for arch in architectures:
-                                self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
+                                self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
                                 for file in self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES):
                                     self.download_file(file, check_only=check_only, no_clean=no_clean)
                                 self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
