@@ -157,6 +157,10 @@ class SnapshotMirrorException(Exception):
     pass
 
 
+class SnapshotMirrorRepodataNotFoundException(Exception):
+    pass
+
+
 class File:
     def __init__(self, name, version, architecture, archive, timestamp, suite, component, size, sha256, url):
         self.name = name
@@ -216,6 +220,9 @@ class SnapshotMirrorCli:
                     repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
                     if session.query(DBrepodata).get(repodata_id):
                         session.close()
+                        continue
+                    if not os.path.exists(repodata_path):
+                        logger.error(f"Cannot find {repodata_path}.")
                         continue
                     with open(repodata_path) as fd:
                         if arch == "source":
@@ -477,6 +484,8 @@ class SnapshotMirrorCli:
         localfile = self.localdir + f
         remotefile = f"{baseurl}{f}"
         logger.debug(remotefile)
+        if not requests.head(remotefile).ok:
+            raise SnapshotMirrorRepodataNotFoundException(f)
         if not os.path.exists(localfile):
             self.download(remotefile)
 
@@ -553,7 +562,10 @@ class SnapshotMirrorCli:
                         for component in self.components:
                             for arch in self.architectures:
                                 # Download repository metadata
-                                self.download_repodata(archive, timestamp, suite, component, arch)
+                                try:
+                                    self.download_repodata(archive, timestamp, suite, component, arch)
+                                except SnapshotMirrorRepodataNotFoundException:
+                                    continue
                                 self.download_translation(archive, timestamp, suite, component)
                                 # Download repository files
                                 for file in self.get_files(archive, timestamp, suite, component, arch):
