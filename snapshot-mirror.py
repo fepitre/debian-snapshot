@@ -199,11 +199,11 @@ class SnapshotMirrorCli:
         # we convert timestamp to a SQL format
         parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
         db_timestamp = session.query(DBtimestamp).get(parsed_ts)
-        if db_timestamp:
-            session.close()
-            return
-
-        db_timestamp = DBtimestamp(value=parsed_ts)
+        if not db_timestamp:
+            db_timestamp = DBtimestamp(value=parsed_ts)
+            if timestamp != "99990101T000000Z":
+                session.add(db_timestamp)
+                session.commit()
 
         for suite in suites:
             for component in components:
@@ -265,75 +265,73 @@ class SnapshotMirrorCli:
 
                     session.add(DBrepodata(id=repodata_id))
 
-        logger.debug(f"Commit to DB")
-        session.add_all(list(files.values()) + to_add)
-        session.commit()
+        to_add = list(files.values()) + to_add
+        if to_add:
+            logger.debug(f"Commit to DB")
+            session.add_all(to_add)
+            session.commit()
 
-        stmt_insert_new_file = """
-        INSERT INTO files (sha256, size, name, archive_name, path, first_seen, last_seen)
-        SELECT t.sha256, t.size, t.name, t.archive_name, t.path, t.timestamp_value, t.timestamp_value FROM tempfiles t
-        ON CONFLICT DO NOTHING
-        """
-        session.execute(stmt_insert_new_file)
-        session.commit()
-
-        stmt_file_update_first_seen = """
-        UPDATE files AS f
-        SET first_seen= t.min_time
-        FROM (SELECT sha256, min(timestamp_value) as min_time FROM tempfiles GROUP BY sha256) AS t
-        WHERE f.sha256 = t.sha256 AND (min_time < f.first_seen OR f.first_seen is NULL)
-        """
-        session.execute(stmt_file_update_first_seen)
-        session.commit()
-
-        stmt_file_update_last_seen = """
-        UPDATE files AS f
-        SET last_seen = t.max_time
-        FROM (SELECT sha256, max(timestamp_value) as max_time FROM tempfiles GROUP BY sha256) AS t
-        WHERE f.sha256 = t.sha256 AND (max_time > f.last_seen OR f.last_seen is NULL)
-        """
-        session.execute(stmt_file_update_last_seen)
-        session.commit()
-
-        if "source" in arches:
-            stmt_insert_new_srcpkg = """
-            INSERT INTO srcpkg (name, version)
-            SELECT t.name, t.version FROM tempsrcpkg t
+            stmt_insert_new_file = """
+            INSERT INTO files (sha256, size, name, archive_name, path, first_seen, last_seen)
+            SELECT t.sha256, t.size, t.name, t.archive_name, t.path, t.timestamp_value, t.timestamp_value FROM tempfiles t
             ON CONFLICT DO NOTHING
             """
-            session.execute(stmt_insert_new_srcpkg)
+            session.execute(stmt_insert_new_file)
             session.commit()
 
-            stmt_append_new_file_to_srcpkg = """
-            INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
-            SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
-            ON CONFLICT DO NOTHING
+            stmt_file_update_first_seen = """
+            UPDATE files AS f
+            SET first_seen= t.min_time
+            FROM (SELECT sha256, min(timestamp_value) as min_time FROM tempfiles GROUP BY sha256) AS t
+            WHERE f.sha256 = t.sha256 AND (min_time < f.first_seen OR f.first_seen is NULL)
             """
-            session.execute(stmt_append_new_file_to_srcpkg)
+            session.execute(stmt_file_update_first_seen)
             session.commit()
 
-        if len([arch for arch in arches if arch != "source"]) > 0:
-            stmt_insert_new_binpkg = """
-            INSERT INTO binpkg (name, version)
-            SELECT t.name, t.version FROM tempbinpkg t
-            ON CONFLICT DO NOTHING
+            stmt_file_update_last_seen = """
+            UPDATE files AS f
+            SET last_seen = t.max_time
+            FROM (SELECT sha256, max(timestamp_value) as max_time FROM tempfiles GROUP BY sha256) AS t
+            WHERE f.sha256 = t.sha256 AND (max_time > f.last_seen OR f.last_seen is NULL)
             """
-            session.execute(stmt_insert_new_binpkg)
+            session.execute(stmt_file_update_last_seen)
             session.commit()
 
-            stmt_append_new_file_to_binpkg = """
-            INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
-            SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
-            ON CONFLICT DO NOTHING
-            """
-            session.execute(stmt_append_new_file_to_binpkg)
-            session.commit()
+            if "source" in arches:
+                stmt_insert_new_srcpkg = """
+                INSERT INTO srcpkg (name, version)
+                SELECT t.name, t.version FROM tempsrcpkg t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_insert_new_srcpkg)
+                session.commit()
 
-        if timestamp != "99990101T000000Z":
-            session.add(db_timestamp)
-            session.commit()
+                stmt_append_new_file_to_srcpkg = """
+                INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
+                SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_append_new_file_to_srcpkg)
+                session.commit()
+
+            if len([arch for arch in arches if arch != "source"]) > 0:
+                stmt_insert_new_binpkg = """
+                INSERT INTO binpkg (name, version)
+                SELECT t.name, t.version FROM tempbinpkg t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_insert_new_binpkg)
+                session.commit()
+
+                stmt_append_new_file_to_binpkg = """
+                INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
+                SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_append_new_file_to_binpkg)
+                session.commit()
+
         session.close()
-
         DBtempfile.__table__.drop()
         DBtempsrcpkg.__table__.drop()
         DBtempbinpkg.__table__.drop()
