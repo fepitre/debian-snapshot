@@ -22,9 +22,9 @@ import logging
 
 from flask import request, Flask, Response
 from flask_caching import Cache
-# from flask_sqlalchemy import SQLAlchemy
+from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
-from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, db_create_session
+from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, DATABASE_URI
 
 # flask app
 app = Flask(__name__)
@@ -35,6 +35,10 @@ logging.basicConfig(level=logging.INFO)
 
 # flask cache
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
+
+# flask sqlalchemy
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
+db = SQLAlchemy(app)
 
 API_VERSION = "0"
 
@@ -64,8 +68,7 @@ def file_desc(file):
 def timestamps():
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
-        timestamps = session.query(DBtimestamp).all()
+        timestamps = db.session.query(DBtimestamp).all()
         if not list(timestamps):
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -87,8 +90,7 @@ def timestamps():
 def files():
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
-        files = session.query(DBfile).order_by(DBfile.name)
+        files = db.session.query(DBfile).order_by(DBfile.name)
         if not list(files):
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -109,10 +111,9 @@ def files():
 def file_info(file_hash):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
         # we have only one file because we use sha256 as hash
         # compared to snapshot.d.o
-        file = session.query(DBfile).get(file_hash)
+        file = db.session.query(DBfile).get(file_hash)
         if not file:
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -133,8 +134,7 @@ def file_info(file_hash):
 def packages():
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
-        packages = session.query(DBsrcpkg).order_by(DBsrcpkg.name)
+        packages = db.session.query(DBsrcpkg).order_by(DBsrcpkg.name)
         if not list(packages):
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -155,8 +155,7 @@ def packages():
 def package(srcpkgname):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
-        packages = session.query(DBsrcpkg).filter_by(name=srcpkgname)
+        packages = db.session.query(DBsrcpkg).filter_by(name=srcpkgname)
         if not list(packages):
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -179,8 +178,7 @@ def srcfiles(srcpkgname, srcpkgver):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     fileinfo = request.args.get('fileinfo')
     try:
-        session = db_create_session(readonly=True)
-        package = session.query(DBsrcpkg).filter_by(name=srcpkgname, version=srcpkgver).first()
+        package = db.session.query(DBsrcpkg).filter_by(name=srcpkgname, version=srcpkgver).first()
         if not package:
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -207,8 +205,7 @@ def srcfiles(srcpkgname, srcpkgver):
 def binary(pkg_name):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        session = db_create_session(readonly=True)
-        binpackages = session.query(DBbinpkg).filter_by(name=pkg_name)
+        binpackages = db.session.query(DBbinpkg).filter_by(name=pkg_name)
         if not list(binpackages):
             raise SnapshotEmptyQueryException
         status_code = 200
@@ -236,8 +233,7 @@ def binfiles(pkg_name, pkg_ver):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     fileinfo = request.args.get('fileinfo')
     try:
-        session = db_create_session(readonly=True)
-        binpackage = session.query(DBbinpkg).filter_by(name=pkg_name, version=pkg_ver).first()
+        binpackage = db.session.query(DBbinpkg).filter_by(name=pkg_name, version=pkg_ver).first()
         if not binpackage:
             raise SnapshotEmptyQueryException
         status_code = 200
