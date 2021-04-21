@@ -38,7 +38,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fi
 from dateutil.parser import parse as parsedate
 from api.db import DBrepodata, DBtimestamp, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
 
-SNAPSHOT_DEBIAN = "https://snapshot.debian.org"
+SNAPSHOT_DEBIAN = "http://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
@@ -50,8 +50,8 @@ DEBIAN_ARCHIVES = {"debian"}
 # Supported QubesOS archives
 QUBES_ARCHIVES = {"qubes-r4.1-vm"}
 
-MAX_RETRY_WAIT = 30
-MAX_RETRY_STOP = 20
+MAX_RETRY_WAIT = 5
+MAX_RETRY_STOP = 100
 
 MAX_RETRY_RESUME_WAIT = 5
 MAX_RETRY_RESUME_STOP = 1000  # this is clearly bruteforce but we have no choice
@@ -78,10 +78,27 @@ def append_to_str(orig, new):
 
 @retry(
     retry=(
+        retry_if_exception_type(urllib3.exceptions.HTTPError) |
+        retry_if_exception_type(http.client.HTTPException) |
+        retry_if_exception_type(ssl.SSLError) |
+        retry_if_exception_type(requests.exceptions.ConnectionError)
+    ),
+    wait=wait_fixed(MAX_RETRY_WAIT),
+    stop=stop_after_attempt(MAX_RETRY_STOP),
+)
+def url_exists(url):
+    resp = requests.head(url)
+    return resp.ok
+
+
+@retry(
+    retry=(
+        retry_if_exception_type(OSError) |
         retry_if_exception_type(httpx.HTTPError) |
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
         retry_if_exception_type(http.client.HTTPException) |
-        retry_if_exception_type(ssl.SSLError)
+        retry_if_exception_type(ssl.SSLError) |
+        retry_if_exception_type(requests.exceptions.ConnectionError)
     ),
     wait=wait_fixed(MAX_RETRY_WAIT),
     stop=stop_after_attempt(MAX_RETRY_STOP),
@@ -162,7 +179,7 @@ class SnapshotMirrorRepodataNotFoundException(Exception):
 
 
 class File:
-    def __init__(self, name, version, architecture, archive, timestamp, suite, component, size, sha256, url):
+    def __init__(self, name, version, architecture, archive, timestamp, suite, component, size, sha256, relative_path, url):
         self.name = name
         self.version = version
         self.architecture = architecture
@@ -172,10 +189,11 @@ class File:
         self.component = component
         self.size = size
         self.sha256 = sha256
+        self.relative_path = relative_path
         self.url = url
 
     def __repr__(self):
-        return f"{self.archive}:{self.timestamp}:{self.suite}:{self.component}:{os.path.basename(self.url[0])}"
+        return f"{self.archive}:{self.timestamp}:{self.suite}:{self.component}:{os.path.basename(self.relative_path)}"
 
 
 class SnapshotMirrorCli:
@@ -189,6 +207,9 @@ class SnapshotMirrorCli:
 
         if not os.path.exists(self.localdir):
             raise SnapshotMirrorException(f"Cannot find: {self.localdir}")
+
+        self.map_srcpkg_hash = {}
+        self.map_binpkg_hash = {}
 
     def provision_database(self, archive, timestamp, suites, components, arches):
         session = db_create_session()
@@ -402,14 +423,18 @@ class SnapshotMirrorCli:
                                 component=component,
                                 size=src_file["size"],
                                 sha256=src_file["sha256"],
+                                relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}",
                                 url=[
                                     f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
                                 ]
                             )
+                            snapshot_debian_hash = self.map_srcpkg_hash.get(os.path.basename(src_file['name']), None)
+                            if snapshot_debian_hash:
+                                file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
+                                pkg.url.insert(0, file_url)
                             files.append(pkg)
                 else:
                     for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                        url = f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
                         pkg = File(
                             name=raw_pkg["Package"],
                             version=raw_pkg["Version"],
@@ -420,20 +445,27 @@ class SnapshotMirrorCli:
                             component=component,
                             size=raw_pkg['Size'],
                             sha256=raw_pkg["SHA256"],
-                            url=[url],
+                            relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Filename']}",
+                            url=[
+                                f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
+                            ],
                         )
+                        snapshot_debian_hash = self.map_binpkg_hash.get(os.path.basename(raw_pkg['Filename']), None)
+                        if snapshot_debian_hash:
+                            file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
+                            pkg.url.insert(0, file_url)
                         files.append(pkg)
         except Exception as e:
             logger.error(str(e))
         return files
 
-    def download(self, url, sha256=None, size=None, no_clean=False):
+    def download(self, fname, url, sha256=None, size=None, no_clean=False):
         """
         Download function to store file according to its SHA256
         """
         # If SHA256 sum is given (DEB files) we use it else we compute it
         # after download (Packages.gz, i18n etc.).
-        fname = f"{self.localdir}/{url.replace(SNAPSHOT_DEBIAN, '').replace(FTP_DEBIAN, '').replace(SNAPSHOT_QUBES, '')}"
+        # fname = f"{self.localdir}/{url.replace(SNAPSHOT_DEBIAN, '').replace(FTP_DEBIAN, '').replace(SNAPSHOT_QUBES, '')}"
         if sha256:
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{sha256}"
             already_downloaded = False
@@ -441,8 +473,8 @@ class SnapshotMirrorCli:
                 already_downloaded = True
             if not already_downloaded:
                 try:
-                    # For file less than 10MB we do a direct download
-                    if size and int(size) <= 10 * 1000 * 1000:
+                    # For file less than 100MB we do a direct download
+                    if size and int(size) <= 100 * 1000 * 1000:
                         download_with_retry(url, fname_sha256, sha256=sha256, no_clean=no_clean)
                     else:
                         download_with_retry_and_resume(url, fname_sha256, sha256=sha256, no_clean=no_clean)
@@ -482,11 +514,11 @@ class SnapshotMirrorCli:
         localfile = self.localdir + f
         remotefile = f"{baseurl}{f}"
         logger.debug(remotefile)
-        if not requests.head(remotefile).ok:
+        if not url_exists(remotefile):
             raise SnapshotMirrorRepodataNotFoundException(f)
         if os.path.exists(localfile) and force:
             os.remove(localfile)
-        self.download(remotefile)
+        self.download(localfile, remotefile)
 
     def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
         """
@@ -506,7 +538,7 @@ class SnapshotMirrorCli:
             logger.debug(remotefile)
             if os.path.exists(localfile) and force:
                 os.remove(localfile)
-            self.download(remotefile)
+            self.download(localfile, remotefile)
 
     def download_translation(self, archive, timestamp, suite, component):
         """
@@ -521,7 +553,7 @@ class SnapshotMirrorCli:
             logger.debug(remotefile)
             if os.path.exists(localfile):
                 continue
-            self.download(remotefile)
+            self.download(localfile, remotefile)
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
@@ -535,12 +567,14 @@ class SnapshotMirrorCli:
                     f"Wrong SHA256 for: {fname_sha256}")
         else:
             result = None
+            localfile = f"{self.localdir}/{file.relative_path}"
             for url in file.url:
                 try:
-                    result = self.download(url, file.sha256, size=file.size, no_clean=no_clean)
+                    # logger.debug(f"Try with URL ({url})")
+                    result = self.download(localfile, url, file.sha256, size=file.size, no_clean=no_clean)
                     break
                 except Exception as e:
-                    logger.debug(f"Try with another URL ({str(e)})")
+                    logger.debug(f"Retry with another URL ({str(e)})")
             if not result:
                 raise SnapshotMirrorException("No more URL to try")
 
@@ -598,6 +632,16 @@ class SnapshotMirrorCli:
                                 for file in self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES):
                                     self.download_file(file, check_only=check_only, no_clean=no_clean)
                                 self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
+
+    def init_snapshot_db_hash(self):
+        if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):
+            import csv
+            with open('/home/user/db/map_srcpkg_hash.csv', newline='') as fd:
+                for row in csv.reader(fd, delimiter=',', quotechar='|'):
+                    self.map_srcpkg_hash[row[0]] = row[1]
+            with open('/home/user/db/map_binpkg_hash.csv', newline='') as fd:
+                for row in csv.reader(fd, delimiter=',', quotechar='|'):
+                    self.map_binpkg_hash[row[0]] = row[1]
 
 
 def get_args():
@@ -700,6 +744,8 @@ def main():
             components=args.component,
             architectures=args.arch,
         )
+        if not args.provision_db:
+            cli.init_snapshot_db_hash()
         # Debian: snapshot.debian.org
         cli.run(
             check_only=args.check_only,
