@@ -56,6 +56,10 @@ MAX_RETRY_STOP = 100
 MAX_RETRY_RESUME_WAIT = 5
 MAX_RETRY_RESUME_STOP = 1000  # this is clearly bruteforce but we have no choice
 
+MAX_DIRECT_DOWNLOAD_SIZE = 100  # MB
+# This is the window blocksize to use for retry and resume download function
+MAX_RETRY_RESUME_BLOCK_SIZE = 50  # MB
+
 logger = logging.getLogger("SnapshotMirror")
 logging.basicConfig(level=logging.INFO)
 
@@ -139,7 +143,7 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
     # Inspired from https://gist.github.com/mjohnsullivan/9322154
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp_path = path + ".part"
-    block_size = 1000 * 1000  # 1MB
+    block_size = MAX_RETRY_RESUME_BLOCK_SIZE * 1000 * 1000  # MB
     first_byte = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
     fname = os.path.basename(url)
     try:
@@ -473,8 +477,8 @@ class SnapshotMirrorCli:
                 already_downloaded = True
             if not already_downloaded:
                 try:
-                    # For file less than 100MB we do a direct download
-                    if size and int(size) <= 100 * 1000 * 1000:
+                    # For file less than MAX_DIRECT_DOWNLOAD_SIZE we do a direct download
+                    if size and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
                         download_with_retry(url, fname_sha256, sha256=sha256, no_clean=no_clean)
                     else:
                         download_with_retry_and_resume(url, fname_sha256, sha256=sha256, no_clean=no_clean)
