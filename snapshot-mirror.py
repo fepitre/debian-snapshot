@@ -189,15 +189,16 @@ class File:
         self.architecture = architecture
         self.archive = archive
         self.timestamp = timestamp
-        self.suite = suite
-        self.component = component
+        # self.suite = suite
+        # self.component = component
         self.size = size
         self.sha256 = sha256
         self.relative_path = relative_path
         self.url = url
 
     def __repr__(self):
-        return f"{self.archive}:{self.timestamp}:{self.suite}:{self.component}:{os.path.basename(self.relative_path)}"
+        # return f"{self.archive}:{self.timestamp}:{self.suite}:{self.component}:{os.path.basename(self.relative_path)}"
+        return f"{self.archive}:{self.timestamp}:{os.path.basename(self.relative_path)}"
 
 
 class SnapshotMirrorCli:
@@ -406,7 +407,7 @@ class SnapshotMirrorCli:
         """"
         Get a parsed files list from Packages.gz or Sources.gz repository file
         """
-        files = []
+        files = {}
         if arch == "source":
             repodata = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"
         else:
@@ -436,7 +437,7 @@ class SnapshotMirrorCli:
                             if snapshot_debian_hash:
                                 file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
                                 pkg.url.insert(0, file_url)
-                            files.append(pkg)
+                            files[src_file["sha256"]] = pkg
                 else:
                     for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
                         pkg = File(
@@ -458,7 +459,7 @@ class SnapshotMirrorCli:
                         if snapshot_debian_hash:
                             file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
                             pkg.url.insert(0, file_url)
-                        files.append(pkg)
+                        files[raw_pkg["SHA256"]] = pkg
         except Exception as e:
             logger.error(str(e))
         return files
@@ -519,6 +520,7 @@ class SnapshotMirrorCli:
         remotefile = f"{baseurl}{f}"
         logger.debug(remotefile)
         if not url_exists(remotefile):
+            logger.error(f"Cannot find {remotefile}")
             raise SnapshotMirrorRepodataNotFoundException(f)
         if os.path.exists(localfile) and force:
             os.remove(localfile)
@@ -540,6 +542,9 @@ class SnapshotMirrorCli:
             localfile = self.localdir + f
             remotefile = f"{baseurl}{f}"
             logger.debug(remotefile)
+            if not url_exists(remotefile):
+                logger.error(f"Cannot find {remotefile}")
+                continue
             if os.path.exists(localfile) and force:
                 os.remove(localfile)
             self.download(localfile, remotefile)
@@ -555,6 +560,9 @@ class SnapshotMirrorCli:
             localfile = self.localdir + f
             remotefile = f"{SNAPSHOT_DEBIAN}{f}"
             logger.debug(remotefile)
+            if not url_exists(remotefile):
+                logger.error(f"Cannot find {remotefile}")
+                continue
             if os.path.exists(localfile):
                 continue
             self.download(localfile, remotefile)
@@ -595,22 +603,32 @@ class SnapshotMirrorCli:
                 if provision_db:
                     self.provision_database(archive, timestamp, self.suites, self.components, self.architectures)
                 else:
+                    # Download repository metadata and translation
+                    files = {}
                     for suite in self.suites:
                         for component in self.components:
+                            self.download_translation(archive, timestamp, suite, component)
                             for arch in self.architectures:
-                                # Download repository metadata
                                 try:
                                     self.download_repodata(archive, timestamp, suite, component, arch)
                                 except SnapshotMirrorRepodataNotFoundException:
                                     continue
-                                self.download_translation(archive, timestamp, suite, component)
-                                # Download repository files
-                                for file in self.get_files(archive, timestamp, suite, component, arch):
-                                    self.download_file(file, check_only=check_only, no_clean=no_clean)
-                                # We download Release files at the end to ack
-                                # the mirror sync. It is for helping rebuilders
-                                # checking available mirrors.
-                                self.download_release(archive, timestamp, suite, component, arch)
+                                files.update(self.get_files(archive, timestamp, suite, component, arch))
+
+                    # Download repository files
+                    for file in sorted(files.values(), key=lambda x: x.name):
+                        self.download_file(file, check_only=check_only, no_clean=no_clean)
+
+                    # We download Release files at the end to ack
+                    # the mirror sync. It is for helping rebuilders
+                    # checking available mirrors.
+                    for suite in self.suites:
+                        for component in self.components:
+                            for arch in self.architectures:
+                                try:
+                                    self.download_release(archive, timestamp, suite, component, arch)
+                                except SnapshotMirrorRepodataNotFoundException:
+                                    continue
 
     def run_qubes(self, check_only=False, no_clean=False, provision_db=False):
         """
