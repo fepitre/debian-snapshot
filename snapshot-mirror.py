@@ -647,13 +647,17 @@ class SnapshotMirrorCli:
                 if provision_db:
                     self.provision_database(archive, timestamp, suites, components, architectures)
                 else:
+                    files = {}
                     for suite in suites:
                         for component in components:
                             for arch in architectures:
                                 self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
-                                for file in self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES):
-                                    self.download_file(file, check_only=check_only, no_clean=no_clean)
+                                files.update(self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES))
                                 self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
+
+                    # Download repository files
+                    for file in sorted(files.values(), key=lambda x: x.name):
+                        self.download_file(file, check_only=check_only, no_clean=no_clean)
 
     def init_snapshot_db_hash(self):
         if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):

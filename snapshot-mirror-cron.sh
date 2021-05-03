@@ -15,7 +15,7 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
     /home/user/snapshot-mirror/snapshot-mirror.py "$SNAPSHOT_MOUNTPOINT" \
         --debug --no-clean-part-file \
         --archive debian --archive qubes-r4.1-vm \
-        --suite unstable --suite bullseye \
+        --suite unstable --suite bullseye --suite buster \
         --arch amd64 --arch all --arch source \
         --timestamp "${LOWER_TIMESTAMP}": \
         > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
