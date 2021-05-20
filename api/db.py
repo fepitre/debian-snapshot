@@ -20,7 +20,7 @@
 from sqlalchemy.engine import Engine
 from sqlalchemy import event
 
-from sqlalchemy import Column, Integer, String, Table, ForeignKey, ForeignKeyConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, Table, ForeignKey, ForeignKeyConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, relationship
@@ -96,7 +96,7 @@ class DBfile(Base):
     __tablename__ = 'files'
 
     sha256 = Column(String(64), primary_key=True)
-    size = Column(Integer, nullable=False)
+    size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
     archive_name = Column(String, nullable=False)
     path = Column(String, nullable=False)
@@ -136,7 +136,7 @@ class DBtempfile(Base):
     __tablename__ = 'tempfiles'
 
     sha256 = Column(String(64), primary_key=True)
-    size = Column(Integer, nullable=False)
+    size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
     archive_name = Column(String, nullable=False)
     path = Column(String, nullable=False)
@@ -149,7 +149,7 @@ class DBtempfile(Base):
 class DBtempsrcpkg(Base):
     __tablename__ = 'tempsrcpkg'
 
-    srcpkg_id = Column(Integer, primary_key=True)
+    srcpkg_id = Column(BigInteger, primary_key=True)
     name = Column(String, nullable=False)
     version = Column(String, nullable=False)
     file_sha256 = Column(String, nullable=False)
@@ -161,7 +161,7 @@ class DBtempsrcpkg(Base):
 class DBtempbinpkg(Base):
     __tablename__ = 'tempbinpkg'
 
-    binpkg_id = Column(Integer, primary_key=True)
+    binpkg_id = Column(BigInteger, primary_key=True)
     name = Column(String, nullable=False)
     version = Column(String, nullable=False)
     file_sha256 = Column(String, nullable=False)
