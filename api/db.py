@@ -149,7 +149,7 @@ class DBtempfile(Base):
 class DBtempsrcpkg(Base):
     __tablename__ = 'tempsrcpkg'
 
-    srcpkg_id = Column(BigInteger, primary_key=True)
+    srcpkg_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     version = Column(String, nullable=False)
     file_sha256 = Column(String, nullable=False)
@@ -161,7 +161,7 @@ class DBtempsrcpkg(Base):
 class DBtempbinpkg(Base):
     __tablename__ = 'tempbinpkg'
 
-    binpkg_id = Column(BigInteger, primary_key=True)
+    binpkg_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
     version = Column(String, nullable=False)
     file_sha256 = Column(String, nullable=False)
