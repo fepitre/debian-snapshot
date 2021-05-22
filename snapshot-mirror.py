@@ -293,6 +293,10 @@ class SnapshotMirrorCli:
         to_add = list(files.values()) + to_add
         if to_add:
             logger.debug(f"Commit to DB {len(to_add)} items")
+            session.execute("ALTER TABLE tempfiles SET UNLOGGED")
+            session.execute("ALTER TABLE tempsrcpkg SET UNLOGGED")
+            session.execute("ALTER TABLE tempbinpkg SET UNLOGGED")
+
             session.add_all(to_add)
             session.commit()
 
