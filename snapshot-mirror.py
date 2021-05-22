@@ -216,11 +216,10 @@ class SnapshotMirrorCli:
         self.map_srcpkg_hash = {}
         self.map_binpkg_hash = {}
 
-    def provision_database(self, archive, timestamp, suites, components, arches):
+    def provision_database(self, archive, timestamp, suites, components, arches, ignore_provisioned=False):
         session = db_create_session()
         to_add = []
         files = {}
-
         logger.info(f"Provision database for timestamp: {timestamp}")
         # we convert timestamp to a SQL format
         parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -228,8 +227,7 @@ class SnapshotMirrorCli:
         if not db_timestamp:
             db_timestamp = DBtimestamp(value=parsed_ts)
             if timestamp != "99990101T000000Z":
-                session.add(db_timestamp)
-                session.commit()
+                to_add.append(db_timestamp)
 
         for suite in suites:
             for component in components:
@@ -244,7 +242,8 @@ class SnapshotMirrorCli:
 
                     # Check if we already provisioned DB with
                     repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
-                    if session.query(DBrepodata).get(repodata_id):
+                    db_repodata = session.query(DBrepodata).get(repodata_id)
+                    if not ignore_provisioned and db_repodata:
                         session.close()
                         continue
                     if not os.path.exists(repodata_path):
@@ -288,12 +287,12 @@ class SnapshotMirrorCli:
                                     file_sha256=raw_pkg["SHA256"],
                                     architecture=raw_pkg['Architecture'])
                                 to_add.append(db_binpkg)
-
-                    session.add(DBrepodata(id=repodata_id))
+                    if not db_repodata:
+                        to_add.append(DBrepodata(id=repodata_id))
 
         to_add = list(files.values()) + to_add
         if to_add:
-            logger.debug(f"Commit to DB")
+            logger.debug(f"Commit to DB {len(to_add)} items")
             session.add_all(to_add)
             session.commit()
 
@@ -590,7 +589,7 @@ class SnapshotMirrorCli:
             if not result:
                 raise SnapshotMirrorException("No more URL to try")
 
-    def run(self, check_only=False, no_clean=False, provision_db=False):
+    def run(self, check_only=False, no_clean=False, provision_db=False, ignore_provisioned=False):
         """
         Run the snapshot mirroring on all the archives, timestamps, suites,
         components and architectures
@@ -598,11 +597,11 @@ class SnapshotMirrorCli:
         os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
         archives = set(self.archives).intersection(DEBIAN_ARCHIVES)
         for archive in archives:
-            for timestamp in self.get_timestamps(archive):
-                # Provision database
-                if provision_db:
-                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures)
-                else:
+            if provision_db:
+                for timestamp in self.get_timestamps(archive):
+                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
+            else:
+                for timestamp in self.get_timestamps(archive):
                     # Download repository metadata and translation
                     files = {}
                     for suite in self.suites:
@@ -723,6 +722,11 @@ def get_args():
         help="Provision database.",
     )
     parser.add_argument(
+        "--ignore-provisioned",
+        action="store_true",
+        help="Ignore already provisioned repodata.",
+    )
+    parser.add_argument(
         "--no-clean-part-file",
         action="store_true",
         help="No clean partially downloaded files.",
@@ -776,7 +780,8 @@ def main():
         cli.run(
             check_only=args.check_only,
             no_clean=args.no_clean_part_file,
-            provision_db=args.provision_db
+            provision_db=args.provision_db,
+            ignore_provisioned=args.ignore_provisioned
         )
         # QubesOS: deb.qubes-os.org/all-versions
         cli.run_qubes(
