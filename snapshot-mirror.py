@@ -253,7 +253,6 @@ class SnapshotMirrorCli:
                         with open(repodata_path) as fd:
                             if arch == "source":
                                 for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
-                                    # print(raw_pkg['Package'])
                                     for src_file in raw_pkg["Checksums-Sha256"]:
                                         if not files.get(src_file['sha256'], None):
                                             db_file = DBtempfile(
@@ -421,7 +420,6 @@ class SnapshotMirrorCli:
                 if arch == "source":
                     for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
                         for src_file in raw_pkg["Checksums-Sha256"]:
-                            # f"{FTP_DEBIAN}/{archive}/{raw_pkg['Directory']}/{src_file['name']}",
                             pkg = File(
                                 name=raw_pkg["Package"],
                                 version=raw_pkg["Version"],
@@ -474,7 +472,6 @@ class SnapshotMirrorCli:
         """
         # If SHA256 sum is given (DEB files) we use it else we compute it
         # after download (Packages.gz, i18n etc.).
-        # fname = f"{self.localdir}/{url.replace(SNAPSHOT_DEBIAN, '').replace(FTP_DEBIAN, '').replace(SNAPSHOT_QUBES, '')}"
         if sha256:
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{sha256}"
             already_downloaded = False
