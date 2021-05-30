@@ -591,7 +591,7 @@ class SnapshotMirrorCli:
             if not result:
                 raise SnapshotMirrorException("No more URL to try")
 
-    def run(self, check_only=False, no_clean=False, provision_db=False, ignore_provisioned=False):
+    def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False):
         """
         Run the snapshot mirroring on all the archives, timestamps, suites,
         components and architectures
@@ -600,13 +600,7 @@ class SnapshotMirrorCli:
         archives = set(self.archives).intersection(DEBIAN_ARCHIVES)
         for archive in archives:
             timestamps = self.get_timestamps(archive)
-            if provision_db:
-                timestamps_chunk_size = 2
-                timestamps_chunks = [timestamps[i:i + timestamps_chunk_size]
-                                     for i in range(0, len(timestamps), timestamps_chunk_size)]
-                for chunk in timestamps_chunks:
-                    self.provision_database(archive, chunk, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
-            else:
+            if not provision_db_only:
                 for timestamp in timestamps:
                     # Download repository metadata and translation
                     files = {}
@@ -634,8 +628,14 @@ class SnapshotMirrorCli:
                                     self.download_release(archive, timestamp, suite, component, arch)
                                 except SnapshotMirrorRepodataNotFoundException:
                                     continue
+            if provision_db:
+                timestamps_chunk_size = 2
+                timestamps_chunks = [timestamps[i:i + timestamps_chunk_size]
+                                     for i in range(0, len(timestamps), timestamps_chunk_size)]
+                for chunk in timestamps_chunks:
+                    self.provision_database(archive, chunk, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
 
-    def run_qubes(self, check_only=False, no_clean=False, provision_db=False):
+    def run_qubes(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False):
         """
         Run the mirroring of Qubes all-versions repository
         """
@@ -648,10 +648,7 @@ class SnapshotMirrorCli:
 
         for archive in archives:
             for timestamp in timestamps:
-                # Provision database
-                if provision_db:
-                    self.provision_database(archive, timestamp, suites, components, architectures)
-                else:
+                if not provision_db_only:
                     files = {}
                     for suite in suites:
                         for component in components:
@@ -663,6 +660,9 @@ class SnapshotMirrorCli:
                     # Download repository files
                     for file in sorted(files.values(), key=lambda x: x.name):
                         self.download_file(file, check_only=check_only, no_clean=no_clean)
+            # Provision database
+            if provision_db:
+                self.provision_database(archive, timestamps, suites, components, architectures, ignore_provisioned=True)
 
     def init_snapshot_db_hash(self):
         if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):
@@ -728,6 +728,11 @@ def get_args():
         help="Provision database.",
     )
     parser.add_argument(
+        "--provision-db-only",
+        action="store_true",
+        help="Provision database only.",
+    )
+    parser.add_argument(
         "--ignore-provisioned",
         action="store_true",
         help="Ignore already provisioned repodata.",
@@ -780,19 +785,21 @@ def main():
             components=args.component,
             architectures=args.arch,
         )
-        if not args.provision_db:
+        if not args.provision_db_only:
             cli.init_snapshot_db_hash()
         # Debian: snapshot.debian.org
         cli.run(
             check_only=args.check_only,
             no_clean=args.no_clean_part_file,
             provision_db=args.provision_db,
+            provision_db_only=args.provision_db_only,
             ignore_provisioned=args.ignore_provisioned
         )
         # QubesOS: deb.qubes-os.org/all-versions
         cli.run_qubes(
             check_only=args.check_only,
             no_clean=args.no_clean_part_file,
+            provision_db_only=args.provision_db_only,
             provision_db=args.provision_db
         )
     except (ValueError, SnapshotMirrorException, KeyboardInterrupt) as e:

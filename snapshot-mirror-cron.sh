@@ -18,6 +18,7 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
         --suite unstable --suite bullseye --suite buster \
         --arch amd64 --arch all --arch source \
         --timestamp "${LOWER_TIMESTAMP}": \
+        --provision-db \
         > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     xz "/var/log/snapshot/${NOW_TIMESTAMP}.log"
 fi
