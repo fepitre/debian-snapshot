@@ -655,7 +655,7 @@ class SnapshotMirrorCli:
                             for arch in architectures:
                                 self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
                                 files.update(self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES))
-                                self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES)
+                                self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
 
                     # Download repository files
                     for file in sorted(files.values(), key=lambda x: x.name):
