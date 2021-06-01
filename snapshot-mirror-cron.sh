@@ -12,6 +12,8 @@ exec {lock_fd}>/home/user/snapshot.lock || exit 1
 flock -n "$lock_fd" || { echo "ERROR: flock() failed." >&2; exit 1; }
 
 if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
+    /home/user/snapshot-mirror/scripts/list-timestamps.py \
+        > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     /home/user/snapshot-mirror/snapshot-mirror.py "$SNAPSHOT_MOUNTPOINT" \
         --debug --no-clean-part-file \
         --archive debian --archive qubes-r4.1-vm \
@@ -19,7 +21,7 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
         --arch amd64 --arch all --arch source \
         --timestamp "${LOWER_TIMESTAMP}": \
         --provision-db \
-        > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
+        >> "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     xz "/var/log/snapshot/${NOW_TIMESTAMP}.log"
 fi
 

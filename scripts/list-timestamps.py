@@ -14,7 +14,7 @@ from pathlib import Path
 
 # FIXME: debian, debian-archive, debian-packports, debian-debug, debian-ports,
 # debian-security, debian-volatile
-outdir = Path("by-timestamp")
+outdir = Path("/snapshot/by-timestamp")
 outdir.mkdir(exist_ok=True)
 for archive in ["debian"]:
 

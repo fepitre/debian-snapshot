@@ -381,6 +381,18 @@ class SnapshotMirrorCli:
             timestamps = sorted(set(resp.text.rstrip("\n").split("\n")), reverse=True)
         return timestamps
 
+    def get_timestamps_from_file(self, archive):
+        """
+        Get all snapshot.debian.org timestamps from local filesytem
+        """
+        localfile = f"{os.path.join(self.localdir, 'by-timestamp', archive + '.txt')}"
+        try:
+            with open(localfile, "r") as fd:
+                timestamps = sorted(set(fd.read().rstrip("\n").split("\n")), reverse=True)
+        except FileNotFoundError as e:
+            raise SnapshotMirrorException(str(e))
+        return timestamps
+
     def get_timestamps(self, archive="debian"):
         """
         Get timestamps to use
@@ -389,7 +401,7 @@ class SnapshotMirrorCli:
         logger.debug("Get timestamps to use")
         if self.timestamps:
             if ':' in self.timestamps[0]:
-                all_timestamps = self.get_timestamps_from_metasnap(archive)
+                all_timestamps = self.get_timestamps_from_file(archive)
                 ts_begin, ts_end = self.timestamps[0].split(":", 1)
                 if not ts_end:
                     ts_end = all_timestamps[0]
