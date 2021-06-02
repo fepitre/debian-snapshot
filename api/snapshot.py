@@ -24,7 +24,8 @@ from flask import request, Flask, Response
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
-from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, DATABASE_URI
+from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
+    FirstFilesLocations, LastFilesLocations, DATABASE_URI
 
 # flask app
 app = Flask(__name__)
@@ -40,7 +41,7 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 db = SQLAlchemy(app)
 
-API_VERSION = "0"
+API_VERSION = "0.1"
 
 
 class SnapshotException(Exception):
@@ -52,13 +53,38 @@ class SnapshotEmptyQueryException(SnapshotException):
 
 
 def file_desc(file):
+    locations = {}
+    # first locations
+    for raw_location in db.session.query(FirstFilesLocations).filter_by(file_sha256=file.sha256):
+        location = {
+            "archive_name": raw_location[1],
+            "suite_name": raw_location[3],
+            "component_name": raw_location[4],
+            "first_seen": parsedate(raw_location[2]).strftime("%Y%m%dT%H%M%SZ")
+        }
+        file_ref = raw_location[0] + raw_location[1] + raw_location[3] + raw_location[4]
+        locations[file_ref] = location
+    # last locations
+    for raw_location in db.session.query(LastFilesLocations).filter_by(file_sha256=file.sha256):
+        location = {
+            "archive_name": raw_location[1],
+            "suite_name": raw_location[3],
+            "component_name": raw_location[4],
+            "last_seen": parsedate(raw_location[2]).strftime("%Y%m%dT%H%M%SZ"),
+        }
+        file_ref = raw_location[0] + raw_location[1] + raw_location[3] + raw_location[4]
+        if locations.get(file_ref, None):
+            locations[file_ref].update(location)
+    locations = list(locations.values())
     desc = {
         "name": file.name,
-        "archive_name": file.archive_name,
         "path": file.path,
         "size": file.size,
-        "first_seen": parsedate(file.first_seen).strftime("%Y%m%dT%H%M%SZ"),
-        "last_seen": parsedate(file.last_seen).strftime("%Y%m%dT%H%M%SZ")
+        "locations": locations,
+
+        # TEMP: for retro-compatibility, we keep this field taken from
+        # the first location
+        "first_seen": locations[0]["first_seen"] if locations else None,
     }
     return desc
 

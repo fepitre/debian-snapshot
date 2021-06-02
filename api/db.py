@@ -50,6 +50,26 @@ def db_create_session(readonly=False):
 # Association tables
 
 
+FirstFilesLocations = Table(
+    'first_files_locations', Base.metadata,
+    Column('file_sha256', String, ForeignKey('files.sha256'), primary_key=True),
+    Column('archive_name', String, primary_key=True),
+    Column('timestamp_value', String, nullable=False),
+    Column('suite_name', String, primary_key=True),
+    Column('component_name', String, primary_key=True)
+)
+
+
+LastFilesLocations = Table(
+    'last_files_locations', Base.metadata,
+    Column('file_sha256', String, ForeignKey('files.sha256'), primary_key=True),
+    Column('archive_name', String, primary_key=True),
+    Column('timestamp_value', String, nullable=False),
+    Column('suite_name', String, primary_key=True),
+    Column('component_name', String, primary_key=True)
+)
+
+
 SrcpkgFiles = Table(
     'srcpkg_files', Base.metadata,
     Column('srcpkg_name', String, primary_key=True),
@@ -64,12 +84,15 @@ SrcpkgFiles = Table(
 class BinpkgFiles(Base):
     __tablename__ = 'binpkg_files'
     __table_args__ = (
-        ForeignKeyConstraint(('binpkg_name', 'binpkg_version'), ('binpkg.name', 'binpkg.version')),
+        ForeignKeyConstraint(
+            ('binpkg_name', 'binpkg_version'),
+            ('binpkg.name', 'binpkg.version')
+        ),
     )
     binpkg_name = Column(String, primary_key=True)
     binpkg_version = Column(String, primary_key=True)
     file_sha256 = Column(String, ForeignKey('files.sha256'), primary_key=True)
-    architecture = Column(String, primary_key=True)
+    architecture = Column(String, ForeignKey('architectures.name'), primary_key=True)
     file = relationship("DBfile")
 
 
@@ -84,6 +107,14 @@ class DBrepodata(Base):
         return f"<ID {self.id}>"
 
 
+class DBarchive(Base):
+    __tablename__ = 'archives'
+    name = Column(String, primary_key=True)
+
+    def __repr__(self):
+        return f"<Archive {self.name}>"
+
+
 class DBtimestamp(Base):
     __tablename__ = 'timestamps'
     value = Column(String, primary_key=True)
@@ -92,16 +123,37 @@ class DBtimestamp(Base):
         return f"<Timestamp {self.value}>"
 
 
+class DBsuite(Base):
+    __tablename__ = 'suites'
+    name = Column(String, primary_key=True)
+
+    def __repr__(self):
+        return f"<Suite {self.name}>"
+
+
+class DBcomponent(Base):
+    __tablename__ = 'components'
+    name = Column(String, primary_key=True)
+
+    def __repr__(self):
+        return f"<Component {self.name}>"
+
+
+class DBarchitecture(Base):
+    __tablename__ = 'architectures'
+    name = Column(String, primary_key=True)
+
+    def __repr__(self):
+        return f"<Architecture {self.name}>"
+
+
 class DBfile(Base):
     __tablename__ = 'files'
 
     sha256 = Column(String(64), primary_key=True)
     size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
-    archive_name = Column(String, nullable=False)
     path = Column(String, nullable=False)
-    first_seen = Column(String, nullable=False)
-    last_seen = Column(String, nullable=False)
 
     def __repr__(self):
         return f"<File {self.sha256}>"
@@ -134,13 +186,16 @@ class DBbinpkg(Base):
 
 class DBtempfile(Base):
     __tablename__ = 'tempfiles'
+    __table_args__ = {'prefixes': ['UNLOGGED']}
 
     sha256 = Column(String(64), primary_key=True)
     size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
-    archive_name = Column(String, nullable=False)
     path = Column(String, nullable=False)
-    timestamp_value = Column(String, nullable=False)
+    archive_name = Column(String, primary_key=True)
+    timestamp_value = Column(String, primary_key=True)
+    suite_name = Column(String, primary_key=True)
+    component_name = Column(String, primary_key=True)
 
     def __repr__(self):
         return f"<TempFile {self.sha256}>"
@@ -148,6 +203,7 @@ class DBtempfile(Base):
 
 class DBtempsrcpkg(Base):
     __tablename__ = 'tempsrcpkg'
+    __table_args__ = {'prefixes': ['UNLOGGED']}
 
     srcpkg_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
@@ -160,6 +216,7 @@ class DBtempsrcpkg(Base):
 
 class DBtempbinpkg(Base):
     __tablename__ = 'tempbinpkg'
+    __table_args__ = {'prefixes': ['UNLOGGED']}
 
     binpkg_id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
