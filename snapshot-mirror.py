@@ -383,7 +383,7 @@ class SnapshotMirrorCli:
 
     def get_timestamps_from_file(self, archive):
         """
-        Get all snapshot.debian.org timestamps from local filesytem
+        Get all snapshot.debian.org timestamps from local filesystem
         """
         localfile = f"{os.path.join(self.localdir, 'by-timestamp', archive + '.txt')}"
         try:
