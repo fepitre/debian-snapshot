@@ -36,7 +36,8 @@ import urllib.request
 import http.client
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 from dateutil.parser import parse as parsedate
-from api.db import DBrepodata, DBtimestamp, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
+from api.db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
+    DBarchitecture, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
 
 SNAPSHOT_DEBIAN = "http://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
@@ -189,15 +190,14 @@ class File:
         self.architecture = architecture
         self.archive = archive
         self.timestamp = timestamp
-        # self.suite = suite
-        # self.component = component
+        self.suite = suite
+        self.component = component
         self.size = size
         self.sha256 = sha256
         self.relative_path = relative_path
         self.url = url
 
     def __repr__(self):
-        # return f"{self.archive}:{self.timestamp}:{self.suite}:{self.component}:{os.path.basename(self.relative_path)}"
         return f"{self.archive}:{self.timestamp}:{os.path.basename(self.relative_path)}"
 
 
@@ -216,11 +216,19 @@ class SnapshotMirrorCli:
         self.map_srcpkg_hash = {}
         self.map_binpkg_hash = {}
 
-    def provision_database(self, archive, timestamps, suites, components, arches, ignore_provisioned=False):
+    def provision_database(self, archive, timestamp, suites, components, arches, ignore_provisioned=False):
         session = db_create_session()
         to_add = []
-        files = {}
-        for timestamp in timestamps:
+        to_add_suites = {}
+        to_add_components = {}
+        to_add_architectures = {}
+        to_add_files = {}
+        try:
+            db_archive = session.query(DBarchive).get(archive)
+            if not db_archive:
+                db_archive = DBarchive(name=archive)
+                to_add.append(db_archive)
+
             logger.info(f"Provision database for timestamp: {timestamp}")
             # we convert timestamp to a SQL format
             parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -231,8 +239,20 @@ class SnapshotMirrorCli:
                     to_add.append(db_timestamp)
 
             for suite in suites:
+                db_suite = session.query(DBsuite).get(suite)
+                if not db_suite and not to_add_suites.get(suite, None):
+                    db_suite = DBsuite(name=suite)
+                    to_add_suites[suite] = db_suite
                 for component in components:
+                    db_component = session.query(DBcomponent).get(component)
+                    if not db_component and not to_add_components.get(component, None):
+                        db_component = DBcomponent(name=component)
+                        to_add_components[component] = db_component
                     for arch in arches:
+                        db_architecture = session.query(DBarchitecture).get(arch)
+                        if not db_architecture and not to_add_architectures.get(arch, None):
+                            db_architecture = DBarchitecture(name=arch)
+                            to_add_architectures[arch] = db_architecture
                         if arch == "source":
                             packages = f"{arch}/Sources.gz"
                         else:
@@ -254,16 +274,19 @@ class SnapshotMirrorCli:
                             if arch == "source":
                                 for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
                                     for src_file in raw_pkg["Checksums-Sha256"]:
-                                        if not files.get(src_file['sha256'], None):
+                                        file_ref = src_file['sha256'] + suite + component
+                                        if not to_add_files.get(file_ref, None):
                                             db_file = DBtempfile(
                                                 sha256=src_file['sha256'],
                                                 size=int(src_file['size']),
                                                 name=src_file['name'],
-                                                archive_name=archive,
                                                 path="/" + raw_pkg['Directory'],
-                                                timestamp_value=parsed_ts
+                                                archive_name=archive,
+                                                timestamp_value=parsed_ts,
+                                                suite_name=suite,
+                                                component_name=component
                                             )
-                                            files[src_file['sha256']] = db_file
+                                            to_add_files[file_ref] = db_file
                                         db_srcpkg = DBtempsrcpkg(
                                             name=raw_pkg['Package'],
                                             version=raw_pkg['Version'],
@@ -271,16 +294,19 @@ class SnapshotMirrorCli:
                                         to_add.append(db_srcpkg)
                             else:
                                 for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                                    if not files.get(raw_pkg['SHA256'], None):
+                                    file_ref = raw_pkg['SHA256'] + suite + component
+                                    if not to_add_files.get(file_ref, None):
                                         db_file = DBtempfile(
                                             sha256=raw_pkg['SHA256'],
                                             size=int(raw_pkg['Size']),
                                             name=os.path.basename(raw_pkg['Filename']),
-                                            archive_name=archive,
                                             path="/" + os.path.dirname(raw_pkg['Filename']),
-                                            timestamp_value=parsed_ts
+                                            archive_name=archive,
+                                            timestamp_value=parsed_ts,
+                                            suite_name=suite,
+                                            component_name=component
                                         )
-                                        files[raw_pkg['SHA256']] = db_file
+                                        to_add_files[file_ref] = db_file
                                     db_binpkg = DBtempbinpkg(
                                         name=raw_pkg['Package'],
                                         version=raw_pkg['Version'],
@@ -290,80 +316,109 @@ class SnapshotMirrorCli:
                         if not db_repodata:
                             to_add.append(DBrepodata(id=repodata_id))
 
-        to_add = list(files.values()) + to_add
-        if to_add:
-            logger.debug(f"Commit to DB {len(to_add)} items")
-            session.execute("ALTER TABLE tempfiles SET UNLOGGED")
-            session.execute("ALTER TABLE tempsrcpkg SET UNLOGGED")
-            session.execute("ALTER TABLE tempbinpkg SET UNLOGGED")
+            # workaround "all" needed in non-"all" packages
+            db_architecture = session.query(DBarchitecture).get("all")
+            if not db_architecture and not to_add_architectures.get("all", None):
+                db_architecture = DBarchitecture(name="all")
+                to_add_architectures["all"] = db_architecture
 
-            session.add_all(to_add)
-            session.commit()
+            to_add_suites = list(to_add_suites.values())
+            to_add_components = list(to_add_components.values())
+            to_add_architectures = list(to_add_architectures.values())
+            to_add_files = list(to_add_files.values())
 
-            stmt_insert_new_file = """
-            INSERT INTO files (sha256, size, name, archive_name, path, first_seen, last_seen)
-            SELECT t.sha256, t.size, t.name, t.archive_name, t.path, t.timestamp_value, t.timestamp_value FROM tempfiles t
+            if to_add_suites:
+                logger.debug(f"Commit to DBsuite: {len(to_add_suites)}")
+                session.add_all(to_add_suites)
+                session.commit()
+
+            if to_add_components:
+                logger.debug(f"Commit to DBcomponent: {len(to_add_components)}")
+                session.add_all(to_add_components)
+                session.commit()
+
+            if to_add_architectures:
+                logger.debug(f"Commit to DBarchitecture: {len(to_add_architectures)}")
+                session.add_all(to_add_architectures)
+                session.commit()
+
+            if to_add:
+                logger.debug(f"Commit to DBarchive, DBtimestamp, DBsrcpkg, DBbinpkg, DBrepodata: {len(to_add)}")
+                session.add_all(to_add)
+                session.commit()
+
+            stmt_insert_new_timestamp_to_archive = f"""
+            INSERT INTO archives_timestamps (archive_name, timestamp_value)
+            VALUES ('{archive}', '{parsed_ts}')
             ON CONFLICT DO NOTHING
             """
-            session.execute(stmt_insert_new_file)
+            session.execute(stmt_insert_new_timestamp_to_archive)
             session.commit()
 
-            stmt_file_update_first_seen = """
-            UPDATE files AS f
-            SET first_seen= t.min_time
-            FROM (SELECT sha256, min(timestamp_value) as min_time FROM tempfiles GROUP BY sha256) AS t
-            WHERE f.sha256 = t.sha256 AND (min_time < f.first_seen OR f.first_seen is NULL)
-            """
-            session.execute(stmt_file_update_first_seen)
-            session.commit()
-
-            stmt_file_update_last_seen = """
-            UPDATE files AS f
-            SET last_seen = t.max_time
-            FROM (SELECT sha256, max(timestamp_value) as max_time FROM tempfiles GROUP BY sha256) AS t
-            WHERE f.sha256 = t.sha256 AND (max_time > f.last_seen OR f.last_seen is NULL)
-            """
-            session.execute(stmt_file_update_last_seen)
-            session.commit()
-
-            if "source" in arches:
-                stmt_insert_new_srcpkg = """
-                INSERT INTO srcpkg (name, version)
-                SELECT t.name, t.version FROM tempsrcpkg t
-                ON CONFLICT DO NOTHING
-                """
-                session.execute(stmt_insert_new_srcpkg)
+            if to_add_files:
+                logger.debug(f"Commit to DBfile: {len(to_add_files)}")
+                session.add_all(to_add_files)
                 session.commit()
 
-                stmt_append_new_file_to_srcpkg = """
-                INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
-                SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
-                ON CONFLICT DO NOTHING
-                """
-                session.execute(stmt_append_new_file_to_srcpkg)
+                session.add_all(to_add_files)
                 session.commit()
 
-            if len([arch for arch in arches if arch != "source"]) > 0:
-                stmt_insert_new_binpkg = """
-                INSERT INTO binpkg (name, version)
-                SELECT t.name, t.version FROM tempbinpkg t
+                stmt_insert_new_file = """
+                INSERT INTO files (sha256, size, name, path)
+                SELECT t.sha256, t.size, t.name, t.path FROM tempfiles t
                 ON CONFLICT DO NOTHING
                 """
-                session.execute(stmt_insert_new_binpkg)
+                session.execute(stmt_insert_new_file)
                 session.commit()
 
-                stmt_append_new_file_to_binpkg = """
-                INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
-                SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
-                ON CONFLICT DO NOTHING
+                stmt_insert_new_location_to_file = """
+                INSERT INTO files_locations (file_sha256, archive_name, suite_name, component_name, timestamp_values)
+                SELECT t.sha256, t.archive_name, t.suite_name, t.component_name, ARRAY[t.timestamp_value]
+                FROM tempfiles t
+                ON CONFLICT (file_sha256, archive_name, suite_name, component_name) DO UPDATE
+                SET timestamp_values = array_append(files_locations.timestamp_values, EXCLUDED.timestamp_values[1])
                 """
-                session.execute(stmt_append_new_file_to_binpkg)
+                session.execute(stmt_insert_new_location_to_file)
                 session.commit()
 
-        session.close()
-        DBtempfile.__table__.drop()
-        DBtempsrcpkg.__table__.drop()
-        DBtempbinpkg.__table__.drop()
+                if "source" in arches:
+                    stmt_insert_new_srcpkg = """
+                    INSERT INTO srcpkg (name, version)
+                    SELECT t.name, t.version FROM tempsrcpkg t
+                    ON CONFLICT DO NOTHING
+                    """
+                    session.execute(stmt_insert_new_srcpkg)
+                    session.commit()
+
+                    stmt_append_new_file_to_srcpkg = """
+                    INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
+                    SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
+                    ON CONFLICT DO NOTHING
+                    """
+                    session.execute(stmt_append_new_file_to_srcpkg)
+                    session.commit()
+
+                if len([arch for arch in arches if arch != "source"]) > 0:
+                    stmt_insert_new_binpkg = """
+                    INSERT INTO binpkg (name, version)
+                    SELECT t.name, t.version FROM tempbinpkg t
+                    ON CONFLICT DO NOTHING
+                    """
+                    session.execute(stmt_insert_new_binpkg)
+                    session.commit()
+
+                    stmt_append_new_file_to_binpkg = """
+                    INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
+                    SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
+                    ON CONFLICT DO NOTHING
+                    """
+                    session.execute(stmt_append_new_file_to_binpkg)
+                    session.commit()
+        finally:
+            session.close()
+            DBtempfile.__table__.drop()
+            DBtempsrcpkg.__table__.drop()
+            DBtempbinpkg.__table__.drop()
 
     @staticmethod
     def get_timestamps_from_metasnap(archive):
@@ -641,11 +696,9 @@ class SnapshotMirrorCli:
                                 except SnapshotMirrorRepodataNotFoundException:
                                     continue
             if provision_db:
-                timestamps_chunk_size = 2
-                timestamps_chunks = [timestamps[i:i + timestamps_chunk_size]
-                                     for i in range(0, len(timestamps), timestamps_chunk_size)]
-                for chunk in timestamps_chunks:
-                    self.provision_database(archive, chunk, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
+                # we provision from past to now for timestamp_values array
+                for timestamp in reversed(timestamps):
+                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
 
     def run_qubes(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False):
         """
@@ -674,7 +727,7 @@ class SnapshotMirrorCli:
                         self.download_file(file, check_only=check_only, no_clean=no_clean)
             # Provision database
             if provision_db:
-                self.provision_database(archive, timestamps, suites, components, architectures, ignore_provisioned=True)
+                self.provision_database(archive, timestamps[0], suites, components, architectures, ignore_provisioned=True)
 
     def init_snapshot_db_hash(self):
         if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):

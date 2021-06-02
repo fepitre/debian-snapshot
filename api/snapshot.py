@@ -24,7 +24,8 @@ from flask import request, Flask, Response
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
-from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, DATABASE_URI
+from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
+    FilesLocations, DATABASE_URI
 
 # flask app
 app = Flask(__name__)
@@ -40,7 +41,7 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 db = SQLAlchemy(app)
 
-API_VERSION = "0"
+API_VERSION = "0.1"
 
 
 class SnapshotException(Exception):
@@ -52,13 +53,25 @@ class SnapshotEmptyQueryException(SnapshotException):
 
 
 def file_desc(file):
+    locations = []
+    for raw_location in db.session.query(FilesLocations).filter_by(file_sha256=file.sha256):
+        location = {
+            "archive": raw_location[1],
+            "suite": raw_location[2],
+            "component": raw_location[3],
+            "timestamps": [parsedate(ts).strftime("%Y%m%dT%H%M%SZ") for ts in raw_location[4]]
+        }
+        locations.append(location)
     desc = {
         "name": file.name,
-        "archive_name": file.archive_name,
         "path": file.path,
         "size": file.size,
-        "first_seen": parsedate(file.first_seen).strftime("%Y%m%dT%H%M%SZ"),
-        "last_seen": parsedate(file.last_seen).strftime("%Y%m%dT%H%M%SZ")
+        "locations": locations,
+
+        # TEMP: for retro-compatibility, we keep those fields taken from
+        # the first location
+        "archive_name": locations[0]["archive"] if locations else None,
+        "first_seen": locations[0]["timestamps"][0] if locations else None
     }
     return desc
 
