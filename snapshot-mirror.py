@@ -216,79 +216,78 @@ class SnapshotMirrorCli:
         self.map_srcpkg_hash = {}
         self.map_binpkg_hash = {}
 
-    def provision_database(self, archive, timestamps, suites, components, arches, ignore_provisioned=False):
+    def provision_database(self, archive, timestamp, suites, components, arches, ignore_provisioned=False):
         session = db_create_session()
         to_add = []
         files = {}
-        for timestamp in timestamps:
-            logger.info(f"Provision database for timestamp: {timestamp}")
-            # we convert timestamp to a SQL format
-            parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
-            db_timestamp = session.query(DBtimestamp).get(parsed_ts)
-            if not db_timestamp:
-                db_timestamp = DBtimestamp(value=parsed_ts)
-                if timestamp != "99990101T000000Z":
-                    to_add.append(db_timestamp)
+        logger.info(f"Provision database for timestamp: {timestamp}")
+        # we convert timestamp to a SQL format
+        parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
+        db_timestamp = session.query(DBtimestamp).get(parsed_ts)
+        if not db_timestamp:
+            db_timestamp = DBtimestamp(value=parsed_ts)
+            if timestamp != "99990101T000000Z":
+                to_add.append(db_timestamp)
 
-            for suite in suites:
-                for component in components:
-                    for arch in arches:
+        for suite in suites:
+            for component in components:
+                for arch in arches:
+                    if arch == "source":
+                        packages = f"{arch}/Sources.gz"
+                    else:
+                        packages = f"binary-{arch}/Packages.gz"
+                    repodata = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/{packages}"
+                    repodata_path = f"{self.localdir}/{repodata}"
+                    logger.debug(f"Processing {repodata_path}")
+
+                    # Check if we already provisioned DB with
+                    repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
+                    db_repodata = session.query(DBrepodata).get(repodata_id)
+                    if not ignore_provisioned and db_repodata:
+                        session.close()
+                        continue
+                    if not os.path.exists(repodata_path):
+                        logger.error(f"Cannot find {repodata_path}.")
+                        continue
+                    with open(repodata_path) as fd:
                         if arch == "source":
-                            packages = f"{arch}/Sources.gz"
-                        else:
-                            packages = f"binary-{arch}/Packages.gz"
-                        repodata = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/{packages}"
-                        repodata_path = f"{self.localdir}/{repodata}"
-                        logger.debug(f"Processing {repodata_path}")
-
-                        # Check if we already provisioned DB with
-                        repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
-                        db_repodata = session.query(DBrepodata).get(repodata_id)
-                        if not ignore_provisioned and db_repodata:
-                            session.close()
-                            continue
-                        if not os.path.exists(repodata_path):
-                            logger.error(f"Cannot find {repodata_path}.")
-                            continue
-                        with open(repodata_path) as fd:
-                            if arch == "source":
-                                for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
-                                    for src_file in raw_pkg["Checksums-Sha256"]:
-                                        if not files.get(src_file['sha256'], None):
-                                            db_file = DBtempfile(
-                                                sha256=src_file['sha256'],
-                                                size=int(src_file['size']),
-                                                name=src_file['name'],
-                                                archive_name=archive,
-                                                path="/" + raw_pkg['Directory'],
-                                                timestamp_value=parsed_ts
-                                            )
-                                            files[src_file['sha256']] = db_file
-                                        db_srcpkg = DBtempsrcpkg(
-                                            name=raw_pkg['Package'],
-                                            version=raw_pkg['Version'],
-                                            file_sha256=src_file["sha256"])
-                                        to_add.append(db_srcpkg)
-                            else:
-                                for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                                    if not files.get(raw_pkg['SHA256'], None):
+                            for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
+                                for src_file in raw_pkg["Checksums-Sha256"]:
+                                    if not files.get(src_file['sha256'], None):
                                         db_file = DBtempfile(
-                                            sha256=raw_pkg['SHA256'],
-                                            size=int(raw_pkg['Size']),
-                                            name=os.path.basename(raw_pkg['Filename']),
+                                            sha256=src_file['sha256'],
+                                            size=int(src_file['size']),
+                                            name=src_file['name'],
                                             archive_name=archive,
-                                            path="/" + os.path.dirname(raw_pkg['Filename']),
+                                            path="/" + raw_pkg['Directory'],
                                             timestamp_value=parsed_ts
                                         )
-                                        files[raw_pkg['SHA256']] = db_file
-                                    db_binpkg = DBtempbinpkg(
+                                        files[src_file['sha256']] = db_file
+                                    db_srcpkg = DBtempsrcpkg(
                                         name=raw_pkg['Package'],
                                         version=raw_pkg['Version'],
-                                        file_sha256=raw_pkg["SHA256"],
-                                        architecture=raw_pkg['Architecture'])
-                                    to_add.append(db_binpkg)
-                        if not db_repodata:
-                            to_add.append(DBrepodata(id=repodata_id))
+                                        file_sha256=src_file["sha256"])
+                                    to_add.append(db_srcpkg)
+                        else:
+                            for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
+                                if not files.get(raw_pkg['SHA256'], None):
+                                    db_file = DBtempfile(
+                                        sha256=raw_pkg['SHA256'],
+                                        size=int(raw_pkg['Size']),
+                                        name=os.path.basename(raw_pkg['Filename']),
+                                        archive_name=archive,
+                                        path="/" + os.path.dirname(raw_pkg['Filename']),
+                                        timestamp_value=parsed_ts
+                                    )
+                                    files[raw_pkg['SHA256']] = db_file
+                                db_binpkg = DBtempbinpkg(
+                                    name=raw_pkg['Package'],
+                                    version=raw_pkg['Version'],
+                                    file_sha256=raw_pkg["SHA256"],
+                                    architecture=raw_pkg['Architecture'])
+                                to_add.append(db_binpkg)
+                    if not db_repodata:
+                        to_add.append(DBrepodata(id=repodata_id))
 
         to_add = list(files.values()) + to_add
         if to_add:
@@ -641,11 +640,8 @@ class SnapshotMirrorCli:
                                 except SnapshotMirrorRepodataNotFoundException:
                                     continue
             if provision_db:
-                timestamps_chunk_size = 2
-                timestamps_chunks = [timestamps[i:i + timestamps_chunk_size]
-                                     for i in range(0, len(timestamps), timestamps_chunk_size)]
-                for chunk in timestamps_chunks:
-                    self.provision_database(archive, chunk, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
+                for timestamp in timestamps:
+                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
 
     def run_qubes(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False):
         """
@@ -674,7 +670,7 @@ class SnapshotMirrorCli:
                         self.download_file(file, check_only=check_only, no_clean=no_clean)
             # Provision database
             if provision_db:
-                self.provision_database(archive, timestamps, suites, components, architectures, ignore_provisioned=True)
+                self.provision_database(archive, timestamps[0], suites, components, architectures, ignore_provisioned=True)
 
     def init_snapshot_db_hash(self):
         if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):
