@@ -19,168 +19,38 @@
 
 import argparse
 import debian.deb822
-import datetime
 import hashlib
 import logging
 import os
-import requests
 import sys
 import uuid
 
-import ssl
-import httpx
-import urllib3.exceptions
-
-import urllib.error
-import urllib.request
-import http.client
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 from dateutil.parser import parse as parsedate
-from api.db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
-    DBarchitecture, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
 
+from lib.log import logger
+from lib.common import parse_ts, sha256sum
+from lib.exceptions import SnapshotException, SnapshotRepodataNotFoundException
+from lib.downloads import url_exists, download_with_retry_and_resume_threshold
+from lib.timestamps import get_timestamps_from_file
+
+from db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
+    DBarchitecture, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
+#
+# Debian
+#
 SNAPSHOT_DEBIAN = "http://snapshot.debian.org"
 FTP_DEBIAN = "https://ftp.debian.org"
-TS_FORMAT = "%Y%m%dT%H%M%SZ"
-
-SNAPSHOT_QUBES = "https://deb.qubes-os.org/all-versions"
 
 # Supported Debian archives
 DEBIAN_ARCHIVES = {"debian"}
 
+#
+# Qubes
+#
+SNAPSHOT_QUBES = "https://deb.qubes-os.org/all-versions"
+
 # Supported QubesOS archives
 QUBES_ARCHIVES = {"qubes-r4.1-vm"}
-
-MAX_RETRY_WAIT = 5
-MAX_RETRY_STOP = 100
-
-MAX_RETRY_RESUME_WAIT = 5
-MAX_RETRY_RESUME_STOP = 1000  # this is clearly bruteforce but we have no choice
-
-MAX_DIRECT_DOWNLOAD_SIZE = 100  # MB
-# This is the window blocksize to use for retry and resume download function
-MAX_RETRY_RESUME_BLOCK_SIZE = 50  # MB
-
-logger = logging.getLogger("SnapshotMirror")
-logging.basicConfig(level=logging.INFO)
-
-
-def sha256sum(fname):
-    sha256 = hashlib.sha256()
-    with open(fname, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            sha256.update(chunk)
-    return sha256.hexdigest()
-
-
-def parse_ts(ts):
-    return datetime.datetime.strptime(ts, TS_FORMAT)
-
-
-def append_to_str(orig, new):
-    return ','.join(sorted(set(orig.split(',') + [new])))
-
-
-@retry(
-    retry=(
-        retry_if_exception_type(urllib3.exceptions.HTTPError) |
-        retry_if_exception_type(http.client.HTTPException) |
-        retry_if_exception_type(ssl.SSLError) |
-        retry_if_exception_type(requests.exceptions.ConnectionError)
-    ),
-    wait=wait_fixed(MAX_RETRY_WAIT),
-    stop=stop_after_attempt(MAX_RETRY_STOP),
-)
-def url_exists(url):
-    resp = requests.head(url)
-    return resp.ok
-
-
-@retry(
-    retry=(
-        retry_if_exception_type(OSError) |
-        retry_if_exception_type(httpx.HTTPError) |
-        retry_if_exception_type(urllib3.exceptions.HTTPError) |
-        retry_if_exception_type(http.client.HTTPException) |
-        retry_if_exception_type(ssl.SSLError) |
-        retry_if_exception_type(requests.exceptions.ConnectionError)
-    ),
-    wait=wait_fixed(MAX_RETRY_WAIT),
-    stop=stop_after_attempt(MAX_RETRY_STOP),
-)
-def download_with_retry(url, path, sha256=None, no_clean=False):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    client = httpx.Client()
-    fname = os.path.basename(url)
-    try:
-        with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            tmp_path = f"{path}.{uuid.uuid4()}.part"
-            with open(tmp_path, "wb") as out_file:
-                for chunk in resp.iter_raw():
-                    out_file.write(chunk)
-    except Exception as e:
-        logger.debug(f"{fname}: retrying ({download_with_retry.retry.statistics['attempt_number']}/{MAX_RETRY_STOP}): {str(e)}")
-        raise http.client.HTTPException
-    tmp_sha256 = sha256sum(tmp_path)
-    if sha256 and tmp_sha256 != sha256:
-        # if not no_clean:
-        #     os.remove(tmp_path)
-        raise Exception(f"{os.path.basename(url)}: wrong SHA256: {tmp_sha256} != {sha256}")
-    os.rename(tmp_path, path)
-    return path
-
-
-@retry(
-    retry=(
-        retry_if_exception_type(IOError) |
-        retry_if_exception_type(http.client.HTTPException) |
-        retry_if_exception_type(ssl.SSLError)
-    ),
-    wait=wait_fixed(MAX_RETRY_RESUME_WAIT),
-    stop=stop_after_attempt(MAX_RETRY_RESUME_STOP),
-)
-def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=False):
-    # Inspired from https://gist.github.com/mjohnsullivan/9322154
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp_path = path + ".part"
-    block_size = MAX_RETRY_RESUME_BLOCK_SIZE * 1000 * 1000  # MB
-    first_byte = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
-    fname = os.path.basename(url)
-    try:
-        file_size = int(urllib.request.urlopen(url).info().get("Content-Length", -1))
-        logger.debug(f"{fname}: starting download at {first_byte / 1e6:.6f}MB "
-                     f"(Total: {file_size / 1e6:.6f}MB)")
-        while first_byte < file_size:
-            last_byte = first_byte + block_size if first_byte + block_size < file_size else file_size - 1
-            r = urllib.request.Request(url)
-            r.headers["Range"] = f"bytes={first_byte}-{last_byte}"
-            logger.debug(f"{fname}: downloading bytes range {first_byte} - {last_byte}")
-            data_chunk = urllib.request.urlopen(r, timeout=timeout).read()
-            with open(tmp_path, "ab") as f:
-                f.write(data_chunk)
-            first_byte = last_byte + 1
-    except Exception as e:
-        logger.debug(f"{fname}: retrying ({download_with_retry_and_resume.retry.statistics['attempt_number']}/{MAX_RETRY_RESUME_STOP}): {str(e)}")
-        raise
-
-    if file_size == os.path.getsize(tmp_path):
-        tmp_sha256 = sha256sum(tmp_path)
-        if sha256 and tmp_sha256 != sha256:
-            if not no_clean:
-                os.remove(tmp_path)
-            raise Exception(f"{fname}: wrong SHA256: {tmp_sha256} != {sha256}")
-        os.rename(tmp_path, path)
-    elif file_size == -1:
-        raise Exception(f"{f}: failed to get 'Content-Length': {url}")
-
-
-class SnapshotMirrorException(Exception):
-    pass
-
-
-class SnapshotMirrorRepodataNotFoundException(Exception):
-    pass
 
 
 class File:
@@ -201,7 +71,7 @@ class File:
         return f"{self.archive}:{self.timestamp}:{os.path.basename(self.relative_path)}"
 
 
-class SnapshotMirrorCli:
+class SnapshotCli:
     def __init__(self, localdir, archives, timestamps, suites, components, architectures):
         self.localdir = os.path.abspath(os.path.expanduser(localdir))
         self.archives = archives
@@ -211,7 +81,7 @@ class SnapshotMirrorCli:
         self.architectures = architectures
 
         if not os.path.exists(self.localdir):
-            raise SnapshotMirrorException(f"Cannot find: {self.localdir}")
+            raise SnapshotException(f"Cannot find: {self.localdir}")
 
         self.map_srcpkg_hash = {}
         self.map_binpkg_hash = {}
@@ -457,34 +327,6 @@ class SnapshotMirrorCli:
             DBtempsrcpkg.__table__.drop()
             DBtempbinpkg.__table__.drop()
 
-    @staticmethod
-    def get_timestamps_from_metasnap(archive):
-        """
-        Get all snapshot.debian.org timestamps from metasnap.debian.net
-        """
-        timestamps = []
-        url = f"https://metasnap.debian.net/cgi-bin/api?timestamps={archive}"
-        try:
-            resp = requests.get(url)
-        except requests.ConnectionError as e:
-            raise SnapshotMirrorException(str(e))
-
-        if resp.ok:
-            timestamps = sorted(set(resp.text.rstrip("\n").split("\n")), reverse=True)
-        return timestamps
-
-    def get_timestamps_from_file(self, archive):
-        """
-        Get all snapshot.debian.org timestamps from local filesystem
-        """
-        localfile = f"{os.path.join(self.localdir, 'by-timestamp', archive + '.txt')}"
-        try:
-            with open(localfile, "r") as fd:
-                timestamps = sorted(set(fd.read().rstrip("\n").split("\n")), reverse=True)
-        except FileNotFoundError as e:
-            raise SnapshotMirrorException(str(e))
-        return timestamps
-
     def get_timestamps(self, archive="debian"):
         """
         Get timestamps to use
@@ -493,7 +335,7 @@ class SnapshotMirrorCli:
         logger.debug("Get timestamps to use")
         if self.timestamps:
             if ':' in self.timestamps[0]:
-                all_timestamps = self.get_timestamps_from_file(archive)
+                all_timestamps = get_timestamps_from_file(self.localdir, archive)
                 ts_begin, ts_end = self.timestamps[0].split(":", 1)
                 if not ts_end:
                     ts_end = all_timestamps[0]
@@ -507,7 +349,7 @@ class SnapshotMirrorCli:
             else:
                 timestamps = self.timestamps
         else:
-            timestamps = self.get_timestamps_from_file(archive)
+            timestamps = get_timestamps_from_file(self.localdir, archive)
         return timestamps
 
     def get_files(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
@@ -583,21 +425,17 @@ class SnapshotMirrorCli:
                 already_downloaded = True
             if not already_downloaded:
                 try:
-                    # For file less than MAX_DIRECT_DOWNLOAD_SIZE we do a direct download
-                    if size and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
-                        download_with_retry(url, fname_sha256, sha256=sha256, no_clean=no_clean)
-                    else:
-                        download_with_retry_and_resume(url, fname_sha256, sha256=sha256, no_clean=no_clean)
+                    download_with_retry_and_resume_threshold(url, fname_sha256, size=size, sha256=sha256, no_clean=no_clean)
                 except Exception as e:
-                    raise SnapshotMirrorException(f"Failed to download file: {str(e)}")
+                    raise SnapshotException(f"Failed to download file: {str(e)}")
         else:
             if os.path.exists(fname):
                 return
             tmp_path = f"{self.localdir}/by-hash/SHA256/{uuid.uuid4()}.tmp"
-            download_with_retry(url, tmp_path)
+            download_with_retry_and_resume_threshold(url, tmp_path)
             sha256 = sha256sum(tmp_path)
             if not sha256:
-                raise SnapshotMirrorException(f"Failed to get SHA256: {url}")
+                raise SnapshotException(f"Failed to get SHA256: {url}")
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{sha256}"
             if os.path.exists(fname_sha256):
                 os.remove(tmp_path)
@@ -626,7 +464,7 @@ class SnapshotMirrorCli:
         logger.debug(remotefile)
         if not url_exists(remotefile):
             logger.error(f"Cannot find {remotefile}")
-            raise SnapshotMirrorRepodataNotFoundException(f)
+            raise SnapshotRepodataNotFoundException(f)
         if os.path.exists(localfile) and force:
             os.remove(localfile)
         self.download(localfile, remotefile)
@@ -680,7 +518,7 @@ class SnapshotMirrorCli:
                 logger.info(f"MISSING: {file}")
                 return
             if sha256sum(fname_sha256) != file.sha256:
-                raise SnapshotMirrorException(
+                raise SnapshotException(
                     f"Wrong SHA256 for: {fname_sha256}")
         else:
             result = None
@@ -693,7 +531,7 @@ class SnapshotMirrorCli:
                 except Exception as e:
                     logger.debug(f"Retry with another URL ({str(e)})")
             if not result:
-                raise SnapshotMirrorException("No more URL to try")
+                raise SnapshotException("No more URL to try")
 
     def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False):
         """
@@ -714,7 +552,7 @@ class SnapshotMirrorCli:
                             for arch in self.architectures:
                                 try:
                                     self.download_repodata(archive, timestamp, suite, component, arch)
-                                except SnapshotMirrorRepodataNotFoundException:
+                                except SnapshotRepodataNotFoundException:
                                     continue
                                 files.update(self.get_files(archive, timestamp, suite, component, arch))
 
@@ -730,7 +568,7 @@ class SnapshotMirrorCli:
                             for arch in self.architectures:
                                 try:
                                     self.download_release(archive, timestamp, suite, component, arch)
-                                except SnapshotMirrorRepodataNotFoundException:
+                                except SnapshotRepodataNotFoundException:
                                     continue
             if provision_db:
                 # we provision from past to now for timestamp_ranges array
@@ -781,36 +619,36 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "local_directory",
-        help="Local directory for snapshot mirror.")
+        help="Local directory for snapshot.")
     parser.add_argument(
         "--archive",
-        help="Debian archive to mirror. "
+        help="Debian archive to snapshot. "
              "Default is 'debian' and is the only supported archive right now.",
         action="append",
         default=[],
     )
     parser.add_argument(
         "--suite",
-        help="Debian suite to mirror. Can be used multiple times. "
+        help="Debian suite to snapshot. Can be used multiple times. "
         "Default is 'unstable'",
         action="append",
         default=[],
     )
     parser.add_argument(
         "--component",
-        help="Debian component to mirror. Default is 'main'",
+        help="Debian component to snapshot. Default is 'main'",
         action="append",
         default=[],
     )
     parser.add_argument(
         "--arch",
-        help="Debian arch to mirror. Can be used multiple times.",
+        help="Debian arch to snapshot. Can be used multiple times.",
         action="append",
         default=[],
     )
     parser.add_argument(
         "--timestamp",
-        help="Snapshot timestamp to mirror. Can be used multiple times. "
+        help="Timestamp to use for snapshot. Can be used multiple times. "
         "Default is all the available timestamps. Timestamps range can be "
         "expressed with ':' separator. Empty boundary is allowed and and this "
         "case, it would use the lower or upper value in all the available "
@@ -868,7 +706,7 @@ def main():
         logger.setLevel(logging.ERROR)
 
     if not args.local_directory:
-        logger.error("Please provide local mirror directory")
+        logger.error("Please provide local snapshot directory")
         return 1
 
     if not args.archive:
@@ -879,7 +717,7 @@ def main():
         args.component = ["main"]
 
     try:
-        cli = SnapshotMirrorCli(
+        cli = SnapshotCli(
             localdir=args.local_directory,
             archives=args.archive,
             timestamps=args.timestamp,
@@ -904,7 +742,7 @@ def main():
             provision_db_only=args.provision_db_only,
             provision_db=args.provision_db
         )
-    except (ValueError, SnapshotMirrorException, KeyboardInterrupt) as e:
+    except (ValueError, SnapshotException, KeyboardInterrupt) as e:
         logger.error(str(e))
         return 1
 

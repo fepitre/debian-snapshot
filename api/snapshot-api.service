@@ -5,8 +5,8 @@ After=network.target
 [Service]
 User=user
 Group=www-data
-WorkingDirectory=/home/user/snapshot-mirror/api
-ExecStart=/usr/bin/uwsgi --ini snapshot.ini
+WorkingDirectory=/home/user/debian-snapshot/api
+ExecStart=/usr/bin/uwsgi --ini snapshot-api.ini
 
 [Install]
 WantedBy=multi-user.target

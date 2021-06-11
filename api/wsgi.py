@@ -17,7 +17,7 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-from snapshot import app
+from snapshot_api import app
 
 if __name__ == "__main__":
     app.run()
