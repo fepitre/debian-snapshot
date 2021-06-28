@@ -153,8 +153,9 @@ def packages():
         if not list(packages):
             raise SnapshotEmptyQueryException
         status_code = 200
+        filtered_packages = sorted(set([pkg.name for pkg in packages]))
         api_result.update({
-            "result": [{"package": pkg.name} for pkg in packages],
+            "result": [{"package": pkg} for pkg in filtered_packages],
         })
     except SnapshotEmptyQueryException:
         status_code = 404
