@@ -55,13 +55,13 @@ class SnapshotEmptyQueryException(SnapshotException):
 def file_desc(file):
     locations = []
     for raw_location in db.session.query(FilesLocations).filter_by(file_sha256=file.sha256):
-        for range in raw_location[4]:
+        for rg in raw_location[4]:
             location = {
                 "archive": raw_location[1],
                 "suite": raw_location[2],
                 "component": raw_location[3],
-                "begin": parsedate(range[0]).strftime("%Y%m%dT%H%M%SZ"),
-                "end": parsedate(range[-1]).strftime("%Y%m%dT%H%M%SZ"),
+                "begin": parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
+                "end": parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"),
             }
             locations.append(location)
     desc = {
