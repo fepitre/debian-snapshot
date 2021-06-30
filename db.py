@@ -27,7 +27,7 @@ from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.schema import DDL
 
 # DATABASE_URI = "postgresql://snapshot:snapshot@debian.notset.fr/snapshot"
-DATABASE_URI = "postgresql://snapshot:snapshot@127.0.0.1/snapshot"
+DATABASE_URI = "postgresql://snapshot:snapshot@127.0.0.1/snapshotv2"
 # DATABASE_URI = 'sqlite:////snapshot/snapshot.db'
 
 engine = create_engine(DATABASE_URI)
