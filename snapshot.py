@@ -245,21 +245,8 @@ class SnapshotCli:
                 if rv and rv[0].get("value", None):
                     previous_timestamp = rv[0]["value"]
 
-                # Create query for getting next timestamp (if exists) with respect
-                # to provisioned one 'current_timestamp'
-                query = "SELECT value FROM timestamps WHERE value > '"+current_timestamp+"' ORDER BY value ASC LIMIT 1"
-                rv = plpy.execute(query)
-                next_timestamp = None
-                if rv and rv[0].get("value", None):
-                    next_timestamp = rv[0]["value"]
-
-                if not previous_timestamp and not next_timestamp:
-                    raise ValueError("No other older or earlier timestamp found. This case is not supposed to happen \
-                                      because this python code is triggered only on conflict.")
-
                 # Current timestamp range of the archive
                 backward_range = [previous_timestamp, current_timestamp]
-                forward_range = [current_timestamp, next_timestamp]
 
                 # Check if a file has its latest provisioned timestamp being
                 # the previous timestamp in the archive's timestamps. Else,
@@ -270,10 +257,11 @@ class SnapshotCli:
                 for i, _ in enumerate(updated_ranges):
                     if parsedate(updated_ranges[i][0]) <= parsedate(current_timestamp) <= parsedate(updated_ranges[i][1]):
                         break
-                    elif [forward_range[0], updated_ranges[i][0]] == forward_range:
-                        updated_ranges[i][0] = forward_range[0]
                     elif [updated_ranges[i][1], backward_range[1]] == backward_range:
                         updated_ranges[i][1] = backward_range[1]
+                        if i+1 != len(updated_ranges) and updated_ranges[i][1] == updated_ranges[i+1][0]:
+                            updated_ranges[i+1][0] = updated_ranges[i][0]
+                            updated_ranges.pop(i)
                     elif parsedate(current_timestamp) < parsedate(updated_ranges[i][0]):
                         updated_ranges.insert(i, [current_timestamp, current_timestamp])
                     elif parsedate(updated_ranges[i][1]) < parsedate(current_timestamp) and i+1 == len(updated_ranges):
