@@ -234,15 +234,32 @@ class SnapshotCli:
             get_timestamps_ranges (ranges text[])
                 RETURNS text[]
             AS $$
+                from dateutil.parser import parse as parsedate
+
                 current_timestamp = '{parsed_ts}'
                 # Create query for getting previous timestamp with respect
                 # to provisioned one 'current_timestamp'
                 query = "SELECT value FROM timestamps WHERE value < '"+current_timestamp+"' ORDER BY value DESC LIMIT 1"
                 rv = plpy.execute(query)
-                previous_timestamp = rv[0]["value"]
+                previous_timestamp = None
+                if rv and rv[0].get("value", None):
+                    previous_timestamp = rv[0]["value"]
+
+                # Create query for getting next timestamp (if exists) with respect
+                # to provisioned one 'current_timestamp'
+                query = "SELECT value FROM timestamps WHERE value > '"+current_timestamp+"' ORDER BY value ASC LIMIT 1"
+                rv = plpy.execute(query)
+                next_timestamp = None
+                if rv and rv[0].get("value", None):
+                    next_timestamp = rv[0]["value"]
+
+                if not previous_timestamp and not next_timestamp:
+                    raise ValueError("No other older or earlier timestamp found. This case is not supposed to happen \
+                                      because this python code is triggered only on conflict.")
 
                 # Current timestamp range of the archive
-                current_range = [previous_timestamp, current_timestamp]
+                backward_range = [previous_timestamp, current_timestamp]
+                forward_range = [current_timestamp, next_timestamp]
 
                 # Check if a file has its latest provisioned timestamp being
                 # the previous timestamp in the archive's timestamps. Else,
@@ -250,12 +267,20 @@ class SnapshotCli:
                 # is missing in previous provisioned timestamps.
                 # In this case, we add a singleton range.
                 updated_ranges = ranges.copy()
-                if [updated_ranges[-1][-1], current_range[1]] == current_range:
-                    # we update 'end' timestamp to be the current provisioned one.
-                    updated_ranges[-1][-1] = current_range[1]
-                else:
-                    updated_ranges.append([current_range[1], current_range[1]])
-                # raise Exception(updated_ranges)
+                for i, _ in enumerate(updated_ranges):
+                    if parsedate(updated_ranges[i][0]) <= parsedate(current_timestamp) <= parsedate(updated_ranges[i][1]):
+                        break
+                    elif [forward_range[0], updated_ranges[i][0]] == forward_range:
+                        updated_ranges[i][0] = forward_range[0]
+                    elif [updated_ranges[i][1], backward_range[1]] == backward_range:
+                        updated_ranges[i][1] = backward_range[1]
+                    elif parsedate(current_timestamp) < parsedate(updated_ranges[i][0]):
+                        updated_ranges.insert(i, [current_timestamp, current_timestamp])
+                    elif parsedate(updated_ranges[i][1]) < parsedate(current_timestamp) and i+1 == len(updated_ranges):
+                        updated_ranges.insert(i+1, [current_timestamp, current_timestamp])
+                    else:
+                        continue
+                    break
                 return updated_ranges
             $$ LANGUAGE plpython3u;
             """
