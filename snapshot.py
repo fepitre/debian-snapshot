@@ -18,6 +18,9 @@
 #
 
 import argparse
+import re
+import requests
+
 import debian.deb822
 import hashlib
 import logging
@@ -30,7 +33,7 @@ from dateutil.parser import parse as parsedate
 from lib.log import logger
 from lib.common import parse_ts, sha256sum
 from lib.exceptions import SnapshotException, SnapshotRepodataNotFoundException
-from lib.downloads import url_exists, download_with_retry_and_resume_threshold
+from lib.downloads import url_exists, get_response_with_retry, download_with_retry_and_resume_threshold
 from lib.timestamps import get_timestamps_from_file
 
 from db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
@@ -425,6 +428,15 @@ class SnapshotCli:
             logger.error(str(e))
         return files
 
+    @staticmethod
+    def get_hashes_from_page(url):
+        resp = get_response_with_retry(url)
+        hashes = {}
+        if resp.ok:
+            link_regex = r'<a href=\".+\">(.+)</a> -&gt;\n[ \t]*<a href=\"by-hash/SHA256/.+\">by-hash/SHA256/([0-9a-f]+)</a>\n'
+            hashes = dict((x, y) for x, y in re.findall(link_regex, resp.text))
+        return hashes
+
     def download(self, fname, url, sha256=None, size=None, no_clean=False):
         """
         Download function to store file according to its SHA256
@@ -509,19 +521,52 @@ class SnapshotCli:
         """
         Download repository Translation files
         """
+        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n"
         translation_files = [
-            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n/Translation-en.bz2"
+            "Translation-en.bz2"
         ]
+        hashes = self.get_hashes_from_page(f"{SNAPSHOT_DEBIAN}/{base_url}")
         for f in translation_files:
-            localfile = self.localdir + f
-            remotefile = f"{SNAPSHOT_DEBIAN}{f}"
+            localfile = f"{self.localdir}/{base_url}/{f}"
+            remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
             logger.debug(remotefile)
             if not url_exists(remotefile):
                 logger.error(f"Cannot find {remotefile}")
                 continue
             if os.path.exists(localfile):
                 continue
-            self.download(localfile, remotefile)
+            self.download(localfile, remotefile, sha256=hashes.get(f, None))
+
+    def download_dep11(self, archive, timestamp, suite, component, arches):
+        """
+        Download dep11 repository files
+        """
+        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/dep11"
+        files = [
+            "icons-48x48.tar.gz",
+            "icons-64x64.tar.gz",
+            "icons-128x128.tar.gz",
+            "icons-48x48@2.tar.gz",
+            "icons-64x64@2.tar.gz",
+            "icons-128x128@2.tar.gz",
+        ]
+        for arch in arches:
+            if arch not in ("source", "all"):
+                files += [
+                    f"CID-Index-{arch}.json.gz",
+                    f"Components-{arch}.yml.gz"
+                ]
+        hashes = self.get_hashes_from_page(f"{SNAPSHOT_DEBIAN}/{base_url}")
+        for f in files:
+            localfile = f"{self.localdir}/{base_url}/{f}"
+            remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
+            logger.debug(remotefile)
+            if not url_exists(remotefile):
+                logger.error(f"Cannot find {remotefile}")
+                continue
+            if os.path.exists(localfile):
+                continue
+            self.download(localfile, remotefile, sha256=hashes.get(f, None))
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
@@ -562,6 +607,7 @@ class SnapshotCli:
                     for suite in self.suites:
                         for component in self.components:
                             self.download_translation(archive, timestamp, suite, component)
+                            self.download_dep11(archive, timestamp, suite, component, self.architectures)
                             for arch in self.architectures:
                                 try:
                                     self.download_repodata(archive, timestamp, suite, component, arch)

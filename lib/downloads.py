@@ -41,6 +41,21 @@ def url_exists(url):
 
 @retry(
     retry=(
+        retry_if_exception_type(urllib3.exceptions.HTTPError) |
+        retry_if_exception_type(http.client.HTTPException) |
+        retry_if_exception_type(ssl.SSLError) |
+        retry_if_exception_type(requests.exceptions.ConnectionError)
+    ),
+    wait=wait_fixed(MAX_RETRY_WAIT),
+    stop=stop_after_attempt(MAX_RETRY_STOP),
+)
+def get_response_with_retry(url):
+    resp = requests.get(url)
+    return resp
+
+
+@retry(
+    retry=(
         retry_if_exception_type(OSError) |
         retry_if_exception_type(httpx.HTTPError) |
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
