@@ -29,13 +29,14 @@ MAX_RETRY_RESUME_BLOCK_SIZE = 50  # MB
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
         retry_if_exception_type(http.client.HTTPException) |
         retry_if_exception_type(ssl.SSLError) |
-        retry_if_exception_type(requests.exceptions.ConnectionError)
+        retry_if_exception_type(requests.exceptions.ConnectionError) |
+        retry_if_exception_type(requests.exceptions.ReadTimeout)
     ),
     wait=wait_fixed(MAX_RETRY_WAIT),
     stop=stop_after_attempt(MAX_RETRY_STOP),
 )
-def url_exists(url):
-    resp = requests.head(url)
+def url_exists(url, timeout=10):
+    resp = requests.head(url, timeout=timeout)
     return resp.ok
 
 
@@ -44,13 +45,14 @@ def url_exists(url):
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
         retry_if_exception_type(http.client.HTTPException) |
         retry_if_exception_type(ssl.SSLError) |
-        retry_if_exception_type(requests.exceptions.ConnectionError)
+        retry_if_exception_type(requests.exceptions.ConnectionError) |
+        retry_if_exception_type(requests.exceptions.ReadTimeout)
     ),
     wait=wait_fixed(MAX_RETRY_WAIT),
     stop=stop_after_attempt(MAX_RETRY_STOP),
 )
-def get_response_with_retry(url):
-    resp = requests.get(url)
+def get_response_with_retry(url, timeout=10):
+    resp = requests.get(url, timeout=timeout)
     return resp
 
 
