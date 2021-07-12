@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import urllib.request
+import urllib.error
 import http.client
 import re
 from pathlib import Path
@@ -10,6 +11,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fi
 
 @retry(
     retry=(
+        retry_if_exception_type(urllib.error.HTTPError) |
         retry_if_exception_type(http.client.HTTPException)
     ),
     wait=wait_fixed(5),
