@@ -73,7 +73,7 @@ def file_desc(file):
         # TEMP: for retro-compatibility, we keep those fields taken from
         # the first location
         "archive_name": locations[0]["archive"] if locations else None,
-        "first_seen": locations[0]["timestamps"][0] if locations else None
+        "first_seen": locations[0]["begin"][0] if locations else None
     }
     return desc
 
