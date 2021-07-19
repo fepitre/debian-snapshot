@@ -108,8 +108,7 @@ class SnapshotCli:
             db_timestamp = session.query(DBtimestamp).get(parsed_ts)
             if not db_timestamp:
                 db_timestamp = DBtimestamp(value=parsed_ts)
-                if timestamp != "99990101T000000Z":
-                    to_add.append(db_timestamp)
+                to_add.append(db_timestamp)
 
             for suite in suites:
                 db_suite = session.query(DBsuite).get(suite)
