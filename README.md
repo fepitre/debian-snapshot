@@ -120,6 +120,175 @@ Summary: list all available timestamps for this archive name
 
 >Note: Contrary to `snapshot.debian.org`, we only use `SHA256`.
 
+### API examples
+
+* Get `debian` archive available timestamps (`http://debian.notset.fr/snapshot/mr/timestamp/debian`):
+```json
+{
+  "_api": "0.1",
+  "_comment": "notset",
+  "result": [
+    "20170101T032652Z",
+    "20170101T092432Z",
+    "20170101T153528Z",
+(...)
+    "20210718T032051Z",
+    "20210718T092653Z",
+    "20210718T144801Z",
+    "20210718T204229Z",
+    "20210719T031839Z",
+    "20210719T090459Z"
+  ]
+}
+
+```
+
+* Get source files info for `python-designateclient` package version `2.3.0-2` (`http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1`):
+```json
+{
+  "_api": "0.1",
+  "_comment": "notset",
+  "package": "python-designateclient",
+  "version": "2.3.0-2",
+  "result": [
+    {
+      "hash": "240d86861138fbf8a34c1bf96412bf290dc8eae4a560473b0ecee605b8d1288f"
+    },
+    {
+      "hash": "d65b4d861612c0bed42cdecedbcb0c32d886fc27bdc5642399ed410de042ed85"
+    },
+    {
+      "hash": "ffb63b9b69d579fabd05d81a84c679dc396c29a663fcd244b0e8c600257478f3"
+    }
+  ],
+  "fileinfo": {
+    "240d86861138fbf8a34c1bf96412bf290dc8eae4a560473b0ecee605b8d1288f": [
+      {
+        "name": "python-designateclient_2.3.0-2.dsc",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 3417,
+        "locations": [
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170618T072316Z",
+            "end": "20170821T035341Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170822T154312Z",
+            "end": "20170922T035316Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170924T042402Z",
+            "end": "20171024T092932Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20171025T221056Z",
+            "end": "20171106T213509Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "unstable",
+            "component": "main",
+            "begin": "20170101T032652Z",
+            "end": "20171101T160520Z"
+          }
+        ],
+        "archive_name": "debian",
+        "first_seen": "20170618T072316Z"
+      }
+    ],
+    "d65b4d861612c0bed42cdecedbcb0c32d886fc27bdc5642399ed410de042ed85": [
+      {
+(...)
+      }
+    ],
+    "ffb63b9b69d579fabd05d81a84c679dc396c29a663fcd244b0e8c600257478f3": [
+      {
+(...)
+      }
+    ]
+  }
+}
+```
+
+* Get binary files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
+```json
+{
+  "_api": "0.1",
+  "_comment": "notset",
+  "binary_version": "2.3.0-2",
+  "binary": "python-designateclient",
+  "result": [
+    {
+      "hash": "c50880146a09fa6a6f9cd7dfc11d5c0fc1147c673f938d0a667d348f59caf499",
+      "architecture": "all"
+    }
+  ],
+  "fileinfo": {
+    "c50880146a09fa6a6f9cd7dfc11d5c0fc1147c673f938d0a667d348f59caf499": [
+      {
+        "name": "python-designateclient_2.3.0-2_all.deb",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 43340,
+        "locations": [
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170618T072316Z",
+            "end": "20170821T035341Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170822T154312Z",
+            "end": "20170922T035316Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20170924T042402Z",
+            "end": "20171024T092932Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "buster",
+            "component": "main",
+            "begin": "20171025T221056Z",
+            "end": "20171106T213509Z"
+          },
+          {
+            "archive": "debian",
+            "suite": "unstable",
+            "component": "main",
+            "begin": "20170101T032652Z",
+            "end": "20171101T160520Z"
+          }
+        ],
+        "archive_name": "debian",
+        "first_seen": "20170618T072316Z"
+      }
+    ]
+  }
+}
+```
+
+For every file, you have the detailed info in terms of archive, suite, component and timestamps it has been seen.
+The `begin`/`end` fields in a given location is the range of timestamps, with respect to all timestamps available for the archive, that a file is present.
+
 ## Archives from other distributions
 
 ### QubesOS
