@@ -24,7 +24,7 @@ from flask import request, Flask, Response
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
-from db import DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
+from db import DBarchive, DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
     FilesLocations, DATABASE_URI
 
 # flask app
@@ -78,12 +78,12 @@ def file_desc(file):
     return desc
 
 
-@app.route("/mr/timestamp", methods=["GET"])
+@app.route("/mr/timestamp/<string:archive_name>", methods=["GET"])
 # @cache.cached(timeout=86400)
-def timestamps():
+def timestamps(archive_name):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        timestamps = db.session.query(DBtimestamp).all()
+        timestamps = db.session.query(DBarchive).get(archive_name).timestamps
         if not list(timestamps):
             raise SnapshotEmptyQueryException
         status_code = 200

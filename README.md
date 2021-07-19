@@ -113,9 +113,9 @@ URL: /mr/file/<sha256>/info
 http status codes: 200 404 500
 Summary: information about file
 
-URL: /mr/timestamp
+URL: /mr/timestamp/<archive_name>
 http status codes: 200 404 500
-Summary: list all timestamps
+Summary: list all available timestamps for this archive name
 ```
 
 >Note: Contrary to `snapshot.debian.org`, we only use `SHA256`.
