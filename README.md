@@ -125,7 +125,7 @@ Summary: list all available timestamps for this archive name
 * Get `debian` archive available timestamps (`http://debian.notset.fr/snapshot/mr/timestamp/debian`):
 ```json
 {
-  "_api": "0.1",
+  "_api": "0.2",
   "_comment": "notset",
   "result": [
     "20170101T032652Z",
@@ -146,7 +146,7 @@ Summary: list all available timestamps for this archive name
 * Get source files info for `python-designateclient` package version `2.3.0-2` (`http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1`):
 ```json
 {
-  "_api": "0.1",
+  "_api": "0.2",
   "_comment": "notset",
   "package": "python-designateclient",
   "version": "2.3.0-2",
@@ -167,65 +167,166 @@ Summary: list all available timestamps for this archive name
         "name": "python-designateclient_2.3.0-2.dsc",
         "path": "/pool/main/p/python-designateclient",
         "size": 3417,
-        "locations": [
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170618T072316Z",
-            "end": "20170821T035341Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170822T154312Z",
-            "end": "20170922T035316Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170924T042402Z",
-            "end": "20171024T092932Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20171025T221056Z",
-            "end": "20171106T213509Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "unstable",
-            "component": "main",
-            "begin": "20170101T032652Z",
-            "end": "20171101T160520Z"
-          }
-        ],
         "archive_name": "debian",
-        "first_seen": "20170618T072316Z"
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170618T072316Z",
+        "end_timestamp": "20170821T035341Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.dsc",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 3417,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170822T154312Z",
+        "end_timestamp": "20170922T035316Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.dsc",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 3417,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170924T042402Z",
+        "end_timestamp": "20171024T092932Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.dsc",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 3417,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20171025T221056Z",
+        "end_timestamp": "20171106T213509Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.dsc",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 3417,
+        "archive_name": "debian",
+        "suite_name": "unstable",
+        "component_name": "main",
+        "begin_timestamp": "20170101T032652Z",
+        "end_timestamp": "20171101T160520Z"
       }
     ],
     "d65b4d861612c0bed42cdecedbcb0c32d886fc27bdc5642399ed410de042ed85": [
       {
-(...)
+        "name": "python-designateclient_2.3.0-2.debian.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 4208,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170618T072316Z",
+        "end_timestamp": "20170821T035341Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.debian.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 4208,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170822T154312Z",
+        "end_timestamp": "20170922T035316Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.debian.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 4208,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170924T042402Z",
+        "end_timestamp": "20171024T092932Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.debian.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 4208,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20171025T221056Z",
+        "end_timestamp": "20171106T213509Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2.debian.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 4208,
+        "archive_name": "debian",
+        "suite_name": "unstable",
+        "component_name": "main",
+        "begin_timestamp": "20170101T032652Z",
+        "end_timestamp": "20171101T160520Z"
       }
     ],
     "ffb63b9b69d579fabd05d81a84c679dc396c29a663fcd244b0e8c600257478f3": [
       {
-(...)
+        "name": "python-designateclient_2.3.0.orig.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 57008,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170618T072316Z",
+        "end_timestamp": "20170821T035341Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0.orig.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 57008,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170822T154312Z",
+        "end_timestamp": "20170922T035316Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0.orig.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 57008,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170924T042402Z",
+        "end_timestamp": "20171024T092932Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0.orig.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 57008,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20171025T221056Z",
+        "end_timestamp": "20171106T213509Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0.orig.tar.xz",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 57008,
+        "archive_name": "debian",
+        "suite_name": "unstable",
+        "component_name": "main",
+        "begin_timestamp": "20170101T032652Z",
+        "end_timestamp": "20171101T160520Z"
       }
     ]
   }
 }
+
 ```
 
 * Get binary files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
 ```json
 {
-  "_api": "0.1",
+  "_api": "0.2",
   "_comment": "notset",
   "binary_version": "2.3.0-2",
   "binary": "python-designateclient",
@@ -241,45 +342,51 @@ Summary: list all available timestamps for this archive name
         "name": "python-designateclient_2.3.0-2_all.deb",
         "path": "/pool/main/p/python-designateclient",
         "size": 43340,
-        "locations": [
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170618T072316Z",
-            "end": "20170821T035341Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170822T154312Z",
-            "end": "20170922T035316Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20170924T042402Z",
-            "end": "20171024T092932Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "buster",
-            "component": "main",
-            "begin": "20171025T221056Z",
-            "end": "20171106T213509Z"
-          },
-          {
-            "archive": "debian",
-            "suite": "unstable",
-            "component": "main",
-            "begin": "20170101T032652Z",
-            "end": "20171101T160520Z"
-          }
-        ],
         "archive_name": "debian",
-        "first_seen": "20170618T072316Z"
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170618T072316Z",
+        "end_timestamp": "20170821T035341Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2_all.deb",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 43340,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170822T154312Z",
+        "end_timestamp": "20170922T035316Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2_all.deb",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 43340,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20170924T042402Z",
+        "end_timestamp": "20171024T092932Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2_all.deb",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 43340,
+        "archive_name": "debian",
+        "suite_name": "buster",
+        "component_name": "main",
+        "begin_timestamp": "20171025T221056Z",
+        "end_timestamp": "20171106T213509Z"
+      },
+      {
+        "name": "python-designateclient_2.3.0-2_all.deb",
+        "path": "/pool/main/p/python-designateclient",
+        "size": 43340,
+        "archive_name": "debian",
+        "suite_name": "unstable",
+        "component_name": "main",
+        "begin_timestamp": "20170101T032652Z",
+        "end_timestamp": "20171101T160520Z"
       }
     ]
   }
@@ -287,7 +394,7 @@ Summary: list all available timestamps for this archive name
 ```
 
 For every file, you have the detailed info in terms of archive, suite, component and timestamps it has been seen.
-The `begin`/`end` fields in a given location is the range of timestamps, with respect to all timestamps available for the archive, that a file is present.
+The `begin_timestamp`/`end_timestamp` fields in a given location is the range of timestamps, with respect to all timestamps available for the archive, that a file is present.
 
 ## Archives from other distributions
 

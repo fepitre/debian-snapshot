@@ -41,7 +41,7 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 db = SQLAlchemy(app)
 
-API_VERSION = "0.1"
+API_VERSION = "0.2"
 
 
 class SnapshotException(Exception):
@@ -57,25 +57,18 @@ def file_desc(file):
     for raw_location in db.session.query(FilesLocations).filter_by(file_sha256=file.sha256):
         for rg in raw_location[4]:
             location = {
-                "archive": raw_location[1],
-                "suite": raw_location[2],
-                "component": raw_location[3],
-                "begin": parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
-                "end": parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"),
+                "name": file.name,
+                "path": file.path,
+                "size": file.size,
+
+                "archive_name": raw_location[1],
+                "suite_name": raw_location[2],
+                "component_name": raw_location[3],
+                "begin_timestamp": parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
+                "end_timestamp": parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"),
             }
             locations.append(location)
-    desc = {
-        "name": file.name,
-        "path": file.path,
-        "size": file.size,
-        "locations": locations,
-
-        # TEMP: for retro-compatibility, we keep those fields taken from
-        # the first location
-        "archive_name": locations[0]["archive"] if locations else None,
-        "first_seen": locations[0]["begin"] if locations else None
-    }
-    return desc
+    return locations
 
 
 @app.route("/mr/timestamp/<string:archive_name>", methods=["GET"])
@@ -133,7 +126,7 @@ def file_info(file_hash):
             raise SnapshotEmptyQueryException
         status_code = 200
         api_result.update({
-            "result": [file_desc(file)],
+            "result": file_desc(file),
         })
     except SnapshotEmptyQueryException:
         status_code = 404
@@ -206,7 +199,7 @@ def srcfiles(srcpkgname, srcpkgver):
         if fileinfo == "1":
             api_result["fileinfo"] = {}
             for file in package.files:
-                api_result["fileinfo"][file.sha256] = [file_desc(file)]
+                api_result["fileinfo"][file.sha256] = file_desc(file)
     except SnapshotEmptyQueryException:
         status_code = 404
     except Exception as e:
@@ -262,7 +255,7 @@ def binfiles(pkg_name, pkg_ver):
             api_result["fileinfo"] = {}
             for associated_file in binpackage.files:
                 file = associated_file.file
-                api_result["fileinfo"][file.sha256] = [file_desc(file)]
+                api_result["fileinfo"][file.sha256] = file_desc(file)
     except SnapshotEmptyQueryException:
         status_code = 404
     except Exception as e:
