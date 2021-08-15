@@ -19,16 +19,19 @@
 
 import json
 import logging
+import debian.deb822
 
+from operator import itemgetter
 from flask import request, Flask, Response
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
 from db import DBarchive, DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
-    FilesLocations, DATABASE_URI
+    FilesLocations, BinpkgFiles, DATABASE_URI
 
 # flask app
 app = Flask("DebianSnapshotApi")
+app.config['MAX_CONTENT_LENGTH'] = 4 * 1024 * 1024
 
 # logging
 logger = logging.getLogger(__name__)
@@ -267,6 +270,71 @@ def binfiles(pkg_name, pkg_ver):
                 api_result["fileinfo"][file.sha256] = file_desc(file)
     except SnapshotEmptyQueryException:
         status_code = 404
+    except Exception as e:
+        logger.error(str(e))
+        status_code = 500
+    api_result = json.dumps(api_result, indent=2) + "\n"
+    return Response(api_result, status=status_code, mimetype="application/json")
+
+
+@app.route('/mr/buildinfo', methods=['POST'])
+def upload_buildinfo():
+    api_result = {
+        "_api": API_VERSION,
+        "_comment": "notset: This feature 'à la metasnap.debian.net' is currently very experimental"
+    }
+    try:
+        assert request.content_type.startswith("multipart/form-data;")
+        assert request.form.get("buildinfo")
+        buildinfo_file = request.form['buildinfo']
+        parsed_info = debian.deb822.BuildInfo(buildinfo_file)
+
+        ranges = {}
+        installed = parsed_info.relations['installed-build-depends']
+        for dep in installed:
+            name = dep[0]['name']
+            _, version = dep[0]['version']
+            results = db.session.query(BinpkgFiles.architecture, FilesLocations)\
+                .join(BinpkgFiles, BinpkgFiles.file_sha256 == FilesLocations.c.file_sha256)\
+                .filter_by(binpkg_name=name, binpkg_version=version).all()
+            for r in results:
+                arch, _, archive_name, suite_name, component_name, timestamp_ranges = r
+                requested_suite_name = request.args.get('suite_name')
+                if requested_suite_name and suite_name != requested_suite_name:
+                    continue
+                begin, end = r.timestamp_ranges[0]
+                location = f"{archive_name}:{suite_name}:{component_name}:" \
+                           f"{arch if arch != 'all' else parsed_info['Build-Architecture']}"
+                ranges.setdefault(location, []).append(
+                    (parsedate(begin).strftime("%Y%m%dT%H%M%SZ"),
+                     parsedate(end).strftime("%Y%m%dT%H%M%SZ"))
+                )
+
+        result = {}
+        for loc in ranges:
+            result[loc] = []
+            # Adapted from https://salsa.debian.org/josch/metasnap/-/blob/master/cgi-bin/api#L390
+            # This algorithm is similar to Interval Scheduling
+            # https://en.wikipedia.org/wiki/Interval_scheduling
+            # But instead of returning the ranges, we return the endtime of ranges
+            # See also:
+            # https://stackoverflow.com/questions/27753830/
+            # https://stackoverflow.com/questions/4962015/
+            # https://cs.stackexchange.com/questions/66376/
+            # https://stackoverflow.com/questions/52137509/
+            # https://www.codechef.com/problems/ONEKING
+            # https://discuss.codechef.com/t/oneking-editorial/9096
+            ranges[loc].sort(key=itemgetter(1))
+            res = []
+            last = "19700101T000000Z"  # impossibly early date
+            for b, e in ranges[loc]:
+                if last >= b:
+                    continue
+                last = e
+                res.append(last)
+            result[loc] = res
+        api_result.update(result)
+        status_code = 200
     except Exception as e:
         logger.error(str(e))
         status_code = 500
