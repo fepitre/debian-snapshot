@@ -281,7 +281,7 @@ def binfiles(pkg_name, pkg_ver):
 def upload_buildinfo():
     api_result = {
         "_api": API_VERSION,
-        "_comment": "notset: This feature 'à la metasnap.debian.net' is currently very experimental"
+        "_comment": "notset: This feature is currently very experimental!"
     }
     try:
         assert request.content_type.startswith("multipart/form-data;")
