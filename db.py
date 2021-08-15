@@ -17,14 +17,10 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-from sqlalchemy.engine import Engine
-from sqlalchemy import event
-
 from sqlalchemy import Column, Integer, BigInteger, String, ARRAY, Table, ForeignKey, ForeignKeyConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, relationship
-from sqlalchemy.schema import DDL
 
 # DATABASE_URI = "postgresql://snapshot:snapshot@debian.notset.fr/snapshot"
 DATABASE_URI = "postgresql://snapshot:snapshot@127.0.0.1/snapshot"
