@@ -116,6 +116,11 @@ Summary: information about file
 URL: /mr/timestamp/<archive_name>
 http status codes: 200 404 500
 Summary: list all available timestamps for this archive name
+
+URL: /mr/buildinfo
+Options: suite_name=<suite_name> filter results for the given Debian suite
+http status codes: 200 404 500
+Summary: compute minimal set of timestamps containing all package versions in uploaded buildinfo file
 ```
 
 >Note: Contrary to `snapshot.debian.org`, we only use `SHA256`.
