@@ -253,7 +253,12 @@ def binfiles(pkg_name, pkg_ver):
         api_result.update({
             "binary_version": pkg_ver,
             "binary": pkg_name,
-            "result": [{"hash": associated_file.file_sha256, "architecture": associated_file.architecture} for associated_file in binpackage.files],
+            "result": [
+                {
+                    "hash": associated_file.file_sha256,
+                    "architecture": associated_file.architecture
+                } for associated_file in binpackage.files
+            ],
         })
         if fileinfo == "1":
             api_result["fileinfo"] = {}
