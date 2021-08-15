@@ -28,7 +28,7 @@ from db import DBarchive, DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
     FilesLocations, DATABASE_URI
 
 # flask app
-app = Flask(__name__)
+app = Flask("DebianSnapshotApi")
 
 # logging
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 db = SQLAlchemy(app)
 
-API_VERSION = "0.2"
+API_VERSION = "0.3"
 
 
 class SnapshotException(Exception):
@@ -55,19 +55,23 @@ class SnapshotEmptyQueryException(SnapshotException):
 def file_desc(file):
     locations = []
     for raw_location in db.session.query(FilesLocations).filter_by(file_sha256=file.sha256):
+        timestamp_ranges = []
         for rg in raw_location[4]:
-            location = {
-                "name": file.name,
-                "path": file.path,
-                "size": file.size,
+            timestamp_ranges.append(
+                (parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
+                 parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"))
+            )
+        location = {
+            "name": file.name,
+            "path": file.path,
+            "size": file.size,
 
-                "archive_name": raw_location[1],
-                "suite_name": raw_location[2],
-                "component_name": raw_location[3],
-                "begin_timestamp": parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
-                "end_timestamp": parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"),
-            }
-            locations.append(location)
+            "archive_name": raw_location[1],
+            "suite_name": raw_location[2],
+            "component_name": raw_location[3],
+            "timestamp_ranges": timestamp_ranges
+        }
+        locations.append(location)
     return locations
 
 
