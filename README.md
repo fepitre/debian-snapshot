@@ -127,7 +127,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ### API examples
 
-#### Get `debian` archive available timestamps (`http://debian.notset.fr/snapshot/mr/timestamp/debian`):
+#### Get `debian` archive available timestamps (http://debian.notset.fr/snapshot/mr/timestamp/debian):
 ```json
 {
   "_api": "0.3",
@@ -148,7 +148,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ```
 
-#### Get source files info for `python-designateclient` package version `2.3.0-2` (`http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1`):
+#### Get source files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1):
 ```json
 {
   "_api": "0.3",
