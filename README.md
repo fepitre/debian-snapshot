@@ -127,7 +127,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ### API examples
 
-* Get `debian` archive available timestamps (`http://debian.notset.fr/snapshot/mr/timestamp/debian`):
+#### Get `debian` archive available timestamps (`http://debian.notset.fr/snapshot/mr/timestamp/debian`):
 ```json
 {
   "_api": "0.3",
@@ -148,7 +148,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ```
 
-* Get source files info for `python-designateclient` package version `2.3.0-2` (`http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1`):
+#### Get source files info for `python-designateclient` package version `2.3.0-2` (`http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1`):
 ```json
 {
   "_api": "0.3",
@@ -252,7 +252,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 }
 ```
 
-* Get binary files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
+#### Get binary files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
 ```json
 {
   "_api": "0.3",
@@ -302,9 +302,9 @@ For a given location, the `timestamp_ranges` is a set of all timestamp ranges th
 A timestamp range is in the format of `[begin_timestamp, end_timestamp]` and contains all the timestamps available
 for the archive between `begin_timestamp` and `end_timestamp`.
 
-* Compute a minimal set of timestamps containing all package versions referenced in a buildinfo file
+#### Compute a minimal set of timestamps containing all package versions referenced in a buildinfo file
 
-** Example 1 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo < bash_5.1-2_amd64.buildinfo):
+* Example 1 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo < bash_5.1-2_amd64.buildinfo):
 ```json
 {
   "_api": "0.3",
@@ -328,7 +328,7 @@ for the archive between `begin_timestamp` and `end_timestamp`.
 It gives the set of timestamps containing all package versions referenced in the provided buildinfo file for all
 known locations in the format `{archive_name}:{suite_name}:{component_name}:{build_architecture}`.
 
-** Example 2 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo):
+* Example 2 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo):
 ```json
 {
   "_api": "0.3",
