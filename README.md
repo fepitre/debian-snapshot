@@ -304,7 +304,7 @@ for the archive between `begin_timestamp` and `end_timestamp`.
 
 #### Compute a minimal set of timestamps containing all package versions referenced in a buildinfo file
 
-* Example 1 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo < bash_5.1-2_amd64.buildinfo):
+* Example 1 (`curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo < bash_5.1-2_amd64.buildinfo`):
 ```json
 {
   "_api": "0.3",
@@ -328,7 +328,7 @@ for the archive between `begin_timestamp` and `end_timestamp`.
 It gives the set of timestamps containing all package versions referenced in the provided buildinfo file for all
 known locations in the format `{archive_name}:{suite_name}:{component_name}:{build_architecture}`.
 
-* Example 2 (curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo):
+* Example 2 (`curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo`):
 ```json
 {
   "_api": "0.3",
