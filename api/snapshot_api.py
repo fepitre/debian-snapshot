@@ -283,6 +283,7 @@ def upload_buildinfo():
         "_api": API_VERSION,
         "_comment": "notset: This feature is currently very experimental!"
     }
+    status_code = 200
     try:
         assert request.content_type.startswith("multipart/form-data;")
         assert request.form.get("buildinfo")
@@ -290,51 +291,67 @@ def upload_buildinfo():
         parsed_info = debian.deb822.BuildInfo(buildinfo_file)
 
         ranges = {}
+        not_found = []
         installed = parsed_info.relations['installed-build-depends']
         for dep in installed:
             name = dep[0]['name']
             _, version = dep[0]['version']
+            arch = dep[0]['arch'] or parsed_info['Build-Architecture']
             results = db.session.query(BinpkgFiles.architecture, FilesLocations)\
                 .join(BinpkgFiles, BinpkgFiles.file_sha256 == FilesLocations.c.file_sha256)\
                 .filter_by(binpkg_name=name, binpkg_version=version).all()
+            if len(results) == 0:
+                not_found.append((name, version, arch))
+                continue
             for r in results:
-                arch, _, archive_name, suite_name, component_name, timestamp_ranges = r
+                architecture, _, archive_name, suite_name, component_name, timestamp_ranges = r
+                if architecture not in ("all", arch):
+                    not_found.append(f"{name}:{arch}={version}")
+                    break
                 requested_suite_name = request.args.get('suite_name')
                 if requested_suite_name and suite_name != requested_suite_name:
                     continue
                 begin, end = r.timestamp_ranges[0]
-                location = f"{archive_name}:{suite_name}:{component_name}:" \
-                           f"{arch if arch != 'all' else parsed_info['Build-Architecture']}"
+                location = f"{archive_name}:{suite_name}:{component_name}:{arch}"
                 ranges.setdefault(location, []).append(
                     (parsedate(begin).strftime("%Y%m%dT%H%M%SZ"),
                      parsedate(end).strftime("%Y%m%dT%H%M%SZ"))
                 )
 
-        result = {}
-        for loc in ranges:
-            result[loc] = []
-            # Adapted from https://salsa.debian.org/josch/metasnap/-/blob/master/cgi-bin/api#L390
-            # This algorithm is similar to Interval Scheduling
-            # https://en.wikipedia.org/wiki/Interval_scheduling
-            # But instead of returning the ranges, we return the endtime of ranges
-            # See also:
-            # https://stackoverflow.com/questions/27753830/
-            # https://stackoverflow.com/questions/4962015/
-            # https://cs.stackexchange.com/questions/66376/
-            # https://stackoverflow.com/questions/52137509/
-            # https://www.codechef.com/problems/ONEKING
-            # https://discuss.codechef.com/t/oneking-editorial/9096
-            ranges[loc].sort(key=itemgetter(1))
-            res = []
-            last = "19700101T000000Z"  # impossibly early date
-            for b, e in ranges[loc]:
-                if last >= b:
-                    continue
-                last = e
-                res.append(last)
-            result[loc] = res
-        api_result.update(result)
-        status_code = 200
+            if not_found:
+                api_result["results"] = not_found
+                status_code = 404
+            else:
+                results = []
+                for loc in ranges:
+                    # Adapted from https://salsa.debian.org/josch/metasnap/-/blob/master/cgi-bin/api#L390
+                    # This algorithm is similar to Interval Scheduling
+                    # https://en.wikipedia.org/wiki/Interval_scheduling
+                    # But instead of returning the ranges, we return the endtime of ranges
+                    # See also:
+                    # https://stackoverflow.com/questions/27753830/
+                    # https://stackoverflow.com/questions/4962015/
+                    # https://cs.stackexchange.com/questions/66376/
+                    # https://stackoverflow.com/questions/52137509/
+                    # https://www.codechef.com/problems/ONEKING
+                    # https://discuss.codechef.com/t/oneking-editorial/9096
+                    ranges[loc].sort(key=itemgetter(1))
+                    res = []
+                    last = "19700101T000000Z"  # impossibly early date
+                    for b, e in ranges[loc]:
+                        if last >= b:
+                            continue
+                        last = e
+                        res.append(last)
+                    archive_name, suite_name, component_name, arch = loc.split(":", 4)
+                    results.append({
+                        "archive_name": archive_name,
+                        "suite_name": suite_name,
+                        "component_name": component_name,
+                        "architecture": arch,
+                        "timestamps": res
+                    })
+                api_result["results"] = results
     except Exception as e:
         logger.error(str(e))
         status_code = 500

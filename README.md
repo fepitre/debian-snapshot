@@ -309,35 +309,63 @@ for the archive between `begin_timestamp` and `end_timestamp`.
 {
   "_api": "0.3",
   "_comment": "notset: This feature is currently very experimental!",
-  "debian:bullseye:main:amd64": [
-    "20210101T211102Z",
-    "20210110T204103Z",
-    "20210116T204022Z",
-    "20210208T213147Z"
-  ],
-  "debian:unstable:main:amd64": [
-    "20201230T203527Z",
-    "20210106T142920Z"
-  ],
-  "debian:buster:main:amd64": [
-    "20210705T151228Z"
+  "results": [
+    {
+      "archive_name": "debian",
+      "suite_name": "bullseye",
+      "component_name": "main",
+      "architecture": "amd64",
+      "timestamps": [
+        "20210101T211102Z",
+        "20210110T204103Z",
+        "20210116T204022Z",
+        "20210208T213147Z"
+      ]
+    },
+    {
+      "archive_name": "debian",
+      "suite_name": "unstable",
+      "component_name": "main",
+      "architecture": "amd64",
+      "timestamps": [
+        "20201230T203527Z",
+        "20210106T142920Z"
+      ]
+    },
+    {
+      "archive_name": "debian",
+      "suite_name": "buster",
+      "component_name": "main",
+      "architecture": "amd64",
+      "timestamps": [
+        "20210705T151228Z"
+      ]
+    }
   ]
 }
 ```
 
-It gives the set of timestamps containing all package versions referenced in the provided buildinfo file for all
-known locations in the format `{archive_name}:{suite_name}:{component_name}:{build_architecture}`.
+For every known locations in terms of `archive_name`, `suite_name`, `component_name` and available architecture, it gives
+the set of timestamps containing all package versions referenced in the provided buildinfo file. For rebuilder softwares,
+you would use only one location which can contain more or less timestamps to be added to cover all the packages dependencies.
 
 * Example 2 (`curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo`):
 ```json
 {
   "_api": "0.3",
   "_comment": "notset: This feature is currently very experimental!",
-  "debian:buster:main:amd64": [
-    "20210705T151228Z"
+  "results": [
+    {
+      "archive_name": "debian",
+      "suite_name": "buster",
+      "component_name": "main",
+      "architecture": "amd64",
+      "timestamps": [
+        "20210705T151228Z"
+      ]
+    }
   ]
 }
-
 ```
 It supports to filter which Debian suite to use. Additional filtering options will be provided in a near future.
 
