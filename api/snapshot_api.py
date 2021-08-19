@@ -27,7 +27,7 @@ from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
 from db import DBarchive, DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
-    FilesLocations, BinpkgFiles, DATABASE_URI
+    FilesLocations, BinpkgFiles, ArchivesTimestamps, DATABASE_URI
 
 # flask app
 app = Flask("DebianSnapshotApi")
@@ -79,16 +79,40 @@ def file_desc(file):
 
 
 @app.route("/mr/timestamp/<string:archive_name>", methods=["GET"])
-def timestamps(archive_name):
+def archive_timestamps(archive_name):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
+        archive = db.session.query(DBarchive).get(archive_name)
+        if not archive:
+            raise SnapshotEmptyQueryException
         timestamps = db.session.query(DBarchive).get(archive_name).timestamps
-        if not list(timestamps):
+        status_code = 200
+        api_result.update({
+            "result": [parsedate(ts.value).strftime("%Y%m%dT%H%M%SZ")
+                       for ts in timestamps],
+        })
+    except SnapshotEmptyQueryException:
+        status_code = 404
+    except Exception as e:
+        logger.error(str(e))
+        status_code = 500
+    api_result = json.dumps(api_result, indent=2) + "\n"
+    return Response(api_result, status=status_code, mimetype="application/json")
+
+
+@app.route("/mr/timestamp/<string:archive_name>/<string:timestamp_value>", methods=["GET"])
+def archive_timestamps_value(archive_name, timestamp_value):
+    api_result = {"_api": API_VERSION, "_comment": "notset"}
+    try:
+        timestamp = db.session.query(ArchivesTimestamps)\
+            .filter(ArchivesTimestamps.c.archive_name == archive_name,
+                    ArchivesTimestamps.c.timestamp_value <= timestamp_value)\
+            .order_by(ArchivesTimestamps.c.timestamp_value.desc()).first()
+        if not timestamp:
             raise SnapshotEmptyQueryException
         status_code = 200
         api_result.update({
-            "result": sorted([parsedate(ts.value).strftime("%Y%m%dT%H%M%SZ")
-                              for ts in timestamps]),
+            "result": parsedate(timestamp.timestamp_value).strftime("%Y%m%dT%H%M%SZ"),
         })
     except SnapshotEmptyQueryException:
         status_code = 404
