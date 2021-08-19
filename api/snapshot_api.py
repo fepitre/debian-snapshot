@@ -79,7 +79,6 @@ def file_desc(file):
 
 
 @app.route("/mr/timestamp/<string:archive_name>", methods=["GET"])
-# @cache.cached(timeout=86400)
 def timestamps(archive_name):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
@@ -101,7 +100,6 @@ def timestamps(archive_name):
 
 
 @app.route("/mr/file", methods=["GET"])
-# @cache.cached(timeout=86400)
 def files():
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
@@ -122,7 +120,6 @@ def files():
 
 
 @app.route("/mr/file/<string:file_hash>/info", methods=["GET"])
-# @cache.cached(timeout=86400)
 def file_info(file_hash):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
@@ -145,7 +142,6 @@ def file_info(file_hash):
 
 
 @app.route("/mr/package", methods=["GET"])
-# @cache.cached(timeout=86400)
 def packages():
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
@@ -167,7 +163,6 @@ def packages():
 
 
 @app.route("/mr/package/<string:srcpkgname>", methods=["GET"])
-# @cache.cached(timeout=86400)
 def package(srcpkgname):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
@@ -189,7 +184,6 @@ def package(srcpkgname):
 
 
 @app.route("/mr/package/<string:srcpkgname>/<string:srcpkgver>/srcfiles", methods=["GET"])
-# @cache.cached(timeout=86400)
 def srcfiles(srcpkgname, srcpkgver):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     fileinfo = request.args.get('fileinfo')
@@ -217,7 +211,6 @@ def srcfiles(srcpkgname, srcpkgver):
 
 
 @app.route("/mr/binary/<string:pkg_name>", methods=["GET"])
-# @cache.cached(timeout=86400)
 def binary(pkg_name):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
