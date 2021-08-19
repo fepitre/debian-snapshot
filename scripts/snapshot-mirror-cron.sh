@@ -17,7 +17,7 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
     /home/user/debian-snapshot/snapshot.py "$SNAPSHOT_MOUNTPOINT" \
         --debug --no-clean-part-file \
         --archive debian --archive qubes-r4.1-vm \
-        --suite unstable --suite bullseye --suite buster \
+        --suite unstable --suite bookworm --suite bullseye --suite buster \
         --arch amd64 --arch all --arch source \
         --timestamp "${LOWER_TIMESTAMP}": \
         --provision-db \
