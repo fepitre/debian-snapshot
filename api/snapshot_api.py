@@ -104,10 +104,14 @@ def archive_timestamps(archive_name):
 def archive_timestamps_value(archive_name, timestamp_value):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     try:
-        timestamp = db.session.query(ArchivesTimestamps)\
-            .filter(ArchivesTimestamps.c.archive_name == archive_name,
-                    ArchivesTimestamps.c.timestamp_value <= timestamp_value)\
-            .order_by(ArchivesTimestamps.c.timestamp_value.desc()).first()
+        query = db.session.query(ArchivesTimestamps)
+        # get latest timestamp or closest timestamp
+        if timestamp_value == "latest":
+            query = query.filter(ArchivesTimestamps.c.archive_name == archive_name)
+        else:
+            query = query.filter(ArchivesTimestamps.c.archive_name == archive_name,
+                                 ArchivesTimestamps.c.timestamp_value <= timestamp_value)
+        timestamp = query.order_by(ArchivesTimestamps.c.timestamp_value.desc()).first()
         if not timestamp:
             raise SnapshotEmptyQueryException
         status_code = 200

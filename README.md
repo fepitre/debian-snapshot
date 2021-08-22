@@ -117,6 +117,12 @@ URL: /mr/timestamp/<archive_name>
 http status codes: 200 404 500
 Summary: list all available timestamps for this archive name
 
+URL: /mr/timestamp/<archive_name>/<timestamp_value>
+http status codes: 200 404 500
+Summary: if <timestamp_value> is 'latest', it returns the latest timestamp value available for the
+ requested archive. Else, it returns the closest older timestamp value to <timestamp_value>.
+ If an archive with timestamp <timestamp_value> exists, then <timestamp_value> is returned unchanged.
+
 URL: /mr/buildinfo
 Options: suite_name=<suite_name> filter results for the given Debian suite
 http status codes: 200 404 500
@@ -127,7 +133,9 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ### API examples
 
-#### Get `debian` archive available timestamps (http://debian.notset.fr/snapshot/mr/timestamp/debian):
+#### Get `debian` archive available timestamps:
+
+* Example 1: Query all available timestamps for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian)
 ```json
 {
   "_api": "0.3",
@@ -146,6 +154,24 @@ Summary: compute minimal set of timestamps containing all package versions in up
   ]
 }
 
+```
+
+* Example 2: Query latest timestamp available for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian/latest)
+```json
+{
+  "_api": "0.3",
+  "_comment": "notset",
+  "result": "20210822T023545Z"
+}
+```
+
+* Example 3: Query closest timestamp available for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian/20200101T000000Z)
+```json
+{
+  "_api": "0.3",
+  "_comment": "notset",
+  "result": "20191231T170830Z"
+}
 ```
 
 #### Get source files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1):
