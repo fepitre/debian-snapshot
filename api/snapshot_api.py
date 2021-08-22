@@ -261,7 +261,6 @@ def binary(pkg_name):
 
 
 @app.route("/mr/binary/<string:pkg_name>/<string:pkg_ver>/binfiles", methods=["GET"])
-# @cache.cached(timeout=86400)
 def binfiles(pkg_name, pkg_ver):
     api_result = {"_api": API_VERSION, "_comment": "notset"}
     fileinfo = request.args.get('fileinfo')
