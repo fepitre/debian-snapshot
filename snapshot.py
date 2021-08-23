@@ -33,7 +33,8 @@ from dateutil.parser import parse as parsedate
 from lib.log import logger
 from lib.common import parse_ts, sha256sum
 from lib.exceptions import SnapshotException, SnapshotRepodataNotFoundException
-from lib.downloads import url_exists, get_response_with_retry, download_with_retry_and_resume_threshold
+from lib.downloads import url_exists, get_file_size, \
+    get_response_with_retry, download_with_retry_and_resume_threshold
 from lib.timestamps import get_timestamps_from_file
 
 from db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
@@ -590,7 +591,8 @@ class SnapshotCli:
                         continue
                     if os.path.exists(localfile):
                         continue
-                    self.download(localfile, remotefile, sha256=sha256)
+                    size = get_file_size(remotefile)
+                    self.download(localfile, remotefile, sha256=sha256, size=size)
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)

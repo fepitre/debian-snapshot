@@ -42,6 +42,25 @@ def url_exists(url, timeout=10):
 
 @retry(
     retry=(
+        retry_if_exception_type(urllib.error.URLError) |
+        retry_if_exception_type(http.client.HTTPException) |
+        retry_if_exception_type(ssl.SSLError) |
+        retry_if_exception_type(requests.exceptions.ConnectionError) |
+        retry_if_exception_type(requests.exceptions.ReadTimeout)
+    ),
+    wait=wait_fixed(MAX_RETRY_WAIT),
+    stop=stop_after_attempt(MAX_RETRY_STOP),
+)
+def get_file_size(url):
+    try:
+        size = int(urllib.request.urlopen(url).info().get("Content-Length", -1))
+    except TypeError:
+        size = None
+    return size
+
+
+@retry(
+    retry=(
         retry_if_exception_type(urllib3.exceptions.HTTPError) |
         retry_if_exception_type(http.client.HTTPException) |
         retry_if_exception_type(ssl.SSLError) |
@@ -137,7 +156,7 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
 
 def download_with_retry_and_resume_threshold(url, path, size=None, sha256=None, no_clean=False):
     # For file less than MAX_DIRECT_DOWNLOAD_SIZE we do a direct download
-    if size and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
+    if size is not None and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
         download_with_retry(url, path, sha256=sha256, no_clean=no_clean)
     else:
         download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean)
