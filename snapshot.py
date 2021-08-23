@@ -567,6 +567,31 @@ class SnapshotCli:
                 continue
             self.download(localfile, remotefile, sha256=hashes.get(f, None))
 
+    def download_installer(self, archive, timestamp, suite, component, arch):
+        """
+        Download installer files
+        """
+        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/installer-{arch}/current/images"
+        files = {}
+        if arch not in ("source", "all"):
+            files_listing = f"{SNAPSHOT_DEBIAN}/{base_url}/SHA256SUMS"
+            resp = get_response_with_retry(files_listing)
+            if resp.ok:
+                for f in resp.text.rstrip('\n').split('\n'):
+                    key, val = f.split()
+                    files[key] = val[2:]
+
+                for sha256, f in files.items():
+                    localfile = f"{self.localdir}/{base_url}/{f}"
+                    remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
+                    logger.debug(remotefile)
+                    if not url_exists(remotefile):
+                        logger.error(f"Cannot find {remotefile}")
+                        continue
+                    if os.path.exists(localfile):
+                        continue
+                    self.download(localfile, remotefile, sha256=sha256)
+
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
         if check_only:
@@ -610,6 +635,7 @@ class SnapshotCli:
                             for arch in self.architectures:
                                 try:
                                     self.download_repodata(archive, timestamp, suite, component, arch)
+                                    self.download_installer(archive, timestamp, suite, component, arch)
                                 except SnapshotRepodataNotFoundException:
                                     continue
                                 files.update(self.get_files(archive, timestamp, suite, component, arch))
