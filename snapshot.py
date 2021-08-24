@@ -574,11 +574,23 @@ class SnapshotCli:
         """
         Download installer files
         """
-        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/installer-{arch}/current/images"
+        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}"
         files = {}
+        if arch != "source":
+            repodata_files = ["Packages.gz", "Release"]
+            for f in repodata_files:
+                localfile = f"{self.localdir}/{base_url}/debian-installer/binary-{arch}/{f}"
+                remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/debian-installer/binary-{arch}/{f}"
+                logger.debug(remotefile)
+                if not url_exists(remotefile):
+                    logger.error(f"Cannot find {remotefile}")
+                    continue
+                if os.path.exists(localfile):
+                    continue
+                self.download(localfile, remotefile)
         if arch not in ("source", "all"):
-            localfile_sha256sums = f"{self.localdir}/{base_url}/SHA256SUMS"
-            remotefile_sha256sums = f"{SNAPSHOT_DEBIAN}/{base_url}/SHA256SUMS"
+            localfile_sha256sums = f"{self.localdir}/{base_url}/installer-{arch}/current/images/SHA256SUMS"
+            remotefile_sha256sums = f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/SHA256SUMS"
             if not url_exists(remotefile_sha256sums):
                 logger.error(f"Cannot find {remotefile_sha256sums}")
                 return
@@ -590,8 +602,8 @@ class SnapshotCli:
             for sha256, files in files.items():
                 for f in files:
                     # files has the same hash, it is downloading once then creates symlinks
-                    localfile = f"{self.localdir}/{base_url}/{f}"
-                    remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
+                    localfile = f"{self.localdir}/{base_url}/installer-{arch}/current/images/{f}"
+                    remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/{f}"
                     logger.debug(remotefile)
                     if not url_exists(remotefile):
                         logger.error(f"Cannot find {remotefile}")
