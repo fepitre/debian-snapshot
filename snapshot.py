@@ -584,18 +584,20 @@ class SnapshotCli:
             with open(localfile_sha256sums, 'r') as fd:
                 for f in fd.readlines():
                     key, val = f.split()
-                    files[key] = val[2:]
-            for sha256, f in files.items():
-                localfile = f"{self.localdir}/{base_url}/{f}"
-                remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
-                logger.debug(remotefile)
-                if not url_exists(remotefile):
-                    logger.error(f"Cannot find {remotefile}")
-                    continue
-                if os.path.exists(localfile):
-                    continue
-                size = get_file_size(remotefile)
-                self.download(localfile, remotefile, sha256=sha256, size=size)
+                    files.setdefault(key, []).append(val[2:])
+            for sha256, files in files.items():
+                for f in files:
+                    # files has the same hash, it is downloading once then creates symlinks
+                    localfile = f"{self.localdir}/{base_url}/{f}"
+                    remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
+                    logger.debug(remotefile)
+                    if not url_exists(remotefile):
+                        logger.error(f"Cannot find {remotefile}")
+                        continue
+                    if os.path.exists(localfile):
+                        continue
+                    size = get_file_size(remotefile)
+                    self.download(localfile, remotefile, sha256=sha256, size=size)
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
