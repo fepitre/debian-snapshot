@@ -625,10 +625,11 @@ class SnapshotCli:
         else:
             result = None
             localfile = f"{self.localdir}/{file.relative_path}"
+            size = int(file.size) if file.size is not None else None
             for url in file.url:
                 try:
                     # logger.debug(f"Try with URL ({url})")
-                    result = self.download(localfile, url, file.sha256, size=file.size, no_clean=no_clean)
+                    result = self.download(localfile, url, file.sha256, size=size, no_clean=no_clean)
                     break
                 except Exception as e:
                     logger.debug(f"Retry with another URL ({str(e)})")
