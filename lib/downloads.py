@@ -87,7 +87,7 @@ def get_response_with_retry(url, timeout=10):
     wait=wait_fixed(MAX_RETRY_WAIT),
     stop=stop_after_attempt(MAX_RETRY_STOP),
 )
-def download_with_retry(url, path, sha256=None, no_clean=False):
+def download_with_retry(url, path, sha256=None):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     client = httpx.Client()
     fname = os.path.basename(url)
@@ -119,7 +119,7 @@ def download_with_retry(url, path, sha256=None, no_clean=False):
     wait=wait_fixed(MAX_RETRY_RESUME_WAIT),
     stop=stop_after_attempt(MAX_RETRY_RESUME_STOP),
 )
-def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=False):
+def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=False, file_size=None):
     # Inspired from https://gist.github.com/mjohnsullivan/9322154
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp_path = path + ".part"
@@ -127,7 +127,8 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
     first_byte = os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0
     fname = os.path.basename(url)
     try:
-        file_size = int(urllib.request.urlopen(url).info().get("Content-Length", -1))
+        if file_size is None:
+            file_size = int(urllib.request.urlopen(url).info().get("Content-Length", -1))
         logger.debug(f"{fname}: starting download at {first_byte / 1e6:.6f}MB "
                      f"(Total: {file_size / 1e6:.6f}MB)")
         while first_byte < file_size:
@@ -157,6 +158,6 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
 def download_with_retry_and_resume_threshold(url, path, size=None, sha256=None, no_clean=False):
     # For file less than MAX_DIRECT_DOWNLOAD_SIZE we do a direct download
     if size is not None and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
-        download_with_retry(url, path, sha256=sha256, no_clean=no_clean)
+        download_with_retry(url, path, sha256=sha256)
     else:
-        download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean)
+        download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean, size=size)
