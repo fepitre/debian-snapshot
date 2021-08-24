@@ -374,56 +374,60 @@ class SnapshotCli:
         """
         files = {}
         if arch == "source":
-            repodata = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"
+            repodata_list = [f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"]
         else:
-            repodata = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz"
+            repodata_list = [
+                f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz",
+                f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}/Packages.gz"
+            ]
         try:
-            with open(repodata) as fd:
-                if arch == "source":
-                    for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
-                        for src_file in raw_pkg["Checksums-Sha256"]:
+            for repodata in repodata_list:
+                with open(repodata) as fd:
+                    if arch == "source":
+                        for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
+                            for src_file in raw_pkg["Checksums-Sha256"]:
+                                pkg = File(
+                                    name=raw_pkg["Package"],
+                                    version=raw_pkg["Version"],
+                                    architecture="source",
+                                    archive=archive,
+                                    timestamp=timestamp,
+                                    suite=suite,
+                                    component=component,
+                                    size=src_file["size"],
+                                    sha256=src_file["sha256"],
+                                    relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}",
+                                    url=[
+                                        f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
+                                    ]
+                                )
+                                snapshot_debian_hash = self.map_srcpkg_hash.get(os.path.basename(src_file['name']), None)
+                                if snapshot_debian_hash:
+                                    file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
+                                    pkg.url.insert(0, file_url)
+                                files[src_file["sha256"]] = pkg
+                    else:
+                        for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
                             pkg = File(
                                 name=raw_pkg["Package"],
                                 version=raw_pkg["Version"],
-                                architecture="source",
+                                architecture=raw_pkg["Architecture"],
                                 archive=archive,
                                 timestamp=timestamp,
                                 suite=suite,
                                 component=component,
-                                size=src_file["size"],
-                                sha256=src_file["sha256"],
-                                relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}",
+                                size=raw_pkg['Size'],
+                                sha256=raw_pkg["SHA256"],
+                                relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Filename']}",
                                 url=[
-                                    f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
-                                ]
+                                    f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
+                                ],
                             )
-                            snapshot_debian_hash = self.map_srcpkg_hash.get(os.path.basename(src_file['name']), None)
+                            snapshot_debian_hash = self.map_binpkg_hash.get(os.path.basename(raw_pkg['Filename']), None)
                             if snapshot_debian_hash:
                                 file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
                                 pkg.url.insert(0, file_url)
-                            files[src_file["sha256"]] = pkg
-                else:
-                    for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                        pkg = File(
-                            name=raw_pkg["Package"],
-                            version=raw_pkg["Version"],
-                            architecture=raw_pkg["Architecture"],
-                            archive=archive,
-                            timestamp=timestamp,
-                            suite=suite,
-                            component=component,
-                            size=raw_pkg['Size'],
-                            sha256=raw_pkg["SHA256"],
-                            relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Filename']}",
-                            url=[
-                                f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
-                            ],
-                        )
-                        snapshot_debian_hash = self.map_binpkg_hash.get(os.path.basename(raw_pkg['Filename']), None)
-                        if snapshot_debian_hash:
-                            file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
-                            pkg.url.insert(0, file_url)
-                        files[raw_pkg["SHA256"]] = pkg
+                            files[raw_pkg["SHA256"]] = pkg
         except Exception as e:
             logger.error(str(e))
         return files
