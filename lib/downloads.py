@@ -160,4 +160,4 @@ def download_with_retry_and_resume_threshold(url, path, size=None, sha256=None, 
     if size is not None and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
         download_with_retry(url, path, sha256=sha256)
     else:
-        download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean, size=size)
+        download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean, file_size=size)

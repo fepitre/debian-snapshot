@@ -437,7 +437,7 @@ class SnapshotCli:
             hashes = dict((x, y) for x, y in re.findall(link_regex, resp.text))
         return hashes
 
-    def download(self, fname, url, sha256=None, size=None, no_clean=False):
+    def download(self, fname, url, sha256=None, size=None, no_clean=False, compute_size=False):
         """
         Download function to store file according to its SHA256
         """
@@ -450,6 +450,8 @@ class SnapshotCli:
                 already_downloaded = True
             if not already_downloaded:
                 try:
+                    if compute_size:
+                        size = get_file_size(url)
                     download_with_retry_and_resume_threshold(url, fname_sha256, size=size, sha256=sha256, no_clean=no_clean)
                 except Exception as e:
                     raise SnapshotException(f"Failed to download file: {str(e)}")
@@ -596,8 +598,7 @@ class SnapshotCli:
                         continue
                     if os.path.exists(localfile):
                         continue
-                    size = get_file_size(remotefile)
-                    self.download(localfile, remotefile, sha256=sha256, size=size)
+                    self.download(localfile, remotefile, sha256=sha256, compute_size=True)
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
