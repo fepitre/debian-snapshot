@@ -27,7 +27,7 @@ from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
 from db import DBarchive, DBtimestamp, DBfile, DBsrcpkg, DBbinpkg, \
-    FilesLocations, BinpkgFiles, ArchivesTimestamps, DATABASE_URI
+    HashesLocations, BinpkgFiles, ArchivesTimestamps, DATABASE_URI
 
 # flask app
 app = Flask("DebianSnapshotApi")
@@ -55,23 +55,26 @@ class SnapshotEmptyQueryException(SnapshotException):
     pass
 
 
-def file_desc(file):
+def file_desc(h):
     locations = []
-    for raw_location in db.session.query(FilesLocations).filter_by(file_sha256=file.sha256):
+    for r in db.session.query(HashesLocations, DBfile.name, DBfile.path, DBfile.size)\
+            .filter_by(sha256=h.sha256)\
+            .join(DBfile, DBfile.sha256 == h.sha256)\
+            .all():
         timestamp_ranges = []
-        for rg in raw_location[4]:
+        for rg in r.timestamp_ranges:
             timestamp_ranges.append(
                 (parsedate(rg[0]).strftime("%Y%m%dT%H%M%SZ"),
                  parsedate(rg[-1]).strftime("%Y%m%dT%H%M%SZ"))
             )
         location = {
-            "name": file.name,
-            "path": file.path,
-            "size": file.size,
+            "name": r.name,
+            "path": r.path,
+            "size": r.size,
 
-            "archive_name": raw_location[1],
-            "suite_name": raw_location[2],
-            "component_name": raw_location[3],
+            "archive_name": r.archive_name,
+            "suite_name": r.suite_name,
+            "component_name": r.component_name,
             "timestamp_ranges": timestamp_ranges
         }
         locations.append(location)
@@ -158,12 +161,12 @@ def file_info(file_hash):
     try:
         # we have only one file because we use sha256 as hash
         # compared to snapshot.d.o
-        file = db.session.query(DBfile).get(file_hash)
-        if not file:
+        files = db.session.query(DBfile).filter_by(sha256=file_hash).all()
+        if not files:
             raise SnapshotEmptyQueryException
         status_code = 200
         api_result.update({
-            "result": file_desc(file),
+            "result": [file_desc(f) for f in files],
         })
     except SnapshotEmptyQueryException:
         status_code = 404
@@ -248,12 +251,12 @@ def srcfiles(srcpkgname, srcpkgver):
         api_result.update({
             "package": srcpkgname,
             "version": srcpkgver,
-            "result": [{"hash": file.sha256} for file in package.files],
+            "result": [{"hash": file.sha256} for file in package.hashes],
         })
         if fileinfo == "1":
             api_result["fileinfo"] = {}
-            for file in package.files:
-                api_result["fileinfo"][file.sha256] = file_desc(file)
+            for h in package.hashes:
+                api_result["fileinfo"][h.sha256] = file_desc(h)
     except SnapshotEmptyQueryException:
         status_code = 404
     except Exception as e:
@@ -303,16 +306,15 @@ def binfiles(pkg_name, pkg_ver):
             "binary": pkg_name,
             "result": [
                 {
-                    "hash": associated_file.file_sha256,
+                    "hash": associated_file.sha256,
                     "architecture": associated_file.architecture
-                } for associated_file in binpackage.files
+                } for associated_file in binpackage.hashes
             ],
         })
         if fileinfo == "1":
             api_result["fileinfo"] = {}
-            for associated_file in binpackage.files:
-                file = associated_file.file
-                api_result["fileinfo"][file.sha256] = file_desc(file)
+            for h in binpackage.hashes:
+                api_result["fileinfo"][h.sha256] = file_desc(h)
     except SnapshotEmptyQueryException:
         status_code = 404
     except Exception as e:
@@ -345,8 +347,8 @@ def upload_buildinfo():
             name = dep[0]['name']
             _, version = dep[0]['version']
             arch = dep[0]['arch'] or parsed_info['Build-Architecture']
-            results = db.session.query(BinpkgFiles.architecture, FilesLocations)\
-                .join(BinpkgFiles, BinpkgFiles.file_sha256 == FilesLocations.c.file_sha256)\
+            results = db.session.query(BinpkgFiles.architecture, HashesLocations)\
+                .join(BinpkgFiles, BinpkgFiles.sha256 == HashesLocations.c.sha256)\
                 .filter_by(binpkg_name=name, binpkg_version=version).all()
             if len(results) == 0:
                 not_found.append((name, version, arch))

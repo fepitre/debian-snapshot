@@ -17,7 +17,8 @@
 # with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-from sqlalchemy import Column, Integer, BigInteger, String, ARRAY, Table, ForeignKey, ForeignKeyConstraint
+from sqlalchemy import Column, Integer, BigInteger, String, ARRAY, Table, ForeignKey, \
+    ForeignKeyConstraint, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, relationship
@@ -47,11 +48,12 @@ def db_create_session(readonly=False):
 # Association tables
 
 
-FilesLocations = Table(
-    'files_locations', Base.metadata,
-    Column('file_sha256', String, ForeignKey('files.sha256'), primary_key=True),
+HashesLocations = Table(
+    'hashes_locations', Base.metadata,
+    Column('sha256', String, ForeignKey('hashes.sha256'), primary_key=True),
     Column('archive_name', String, ForeignKey('archives.name'), primary_key=True),
     Column('suite_name', String, ForeignKey('suites.name'), primary_key=True),
+    Column('component_name', String, ForeignKey('components.name'), primary_key=True),
     Column('component_name', String, ForeignKey('components.name'), primary_key=True),
     Column('timestamp_ranges', ARRAY(String), nullable=False)
     # timestamp_ranges is an array of ranges. A range is defined as an array
@@ -66,11 +68,12 @@ ArchivesTimestamps = Table(
     Column('timestamp_value', String, ForeignKey('timestamps.value'), primary_key=True),
 )
 
+
 SrcpkgFiles = Table(
     'srcpkg_files', Base.metadata,
     Column('srcpkg_name', String, primary_key=True),
     Column('srcpkg_version', String, primary_key=True),
-    Column('file_sha256', String, ForeignKey('files.sha256'), primary_key=True),
+    Column('sha256', String, ForeignKey('hashes.sha256'), primary_key=True),
     ForeignKeyConstraint(
         ('srcpkg_name', 'srcpkg_version'),
         ('srcpkg.name', 'srcpkg.version')),
@@ -87,9 +90,9 @@ class BinpkgFiles(Base):
     )
     binpkg_name = Column(String, primary_key=True)
     binpkg_version = Column(String, primary_key=True)
-    file_sha256 = Column(String, ForeignKey('files.sha256'), primary_key=True)
+    sha256 = Column(String, ForeignKey('hashes.sha256'), primary_key=True)
     architecture = Column(String, ForeignKey('architectures.name'), primary_key=True)
-    file = relationship("DBfile")
+    hashes = relationship("DBhash")
 
 
 # Main tables
@@ -144,13 +147,23 @@ class DBarchitecture(Base):
         return f"<Architecture {self.name}>"
 
 
+class DBhash(Base):
+    __tablename__ = 'hashes'
+    sha256 = Column(String(64), primary_key=True)
+
+    def __repr__(self):
+        return f"<Hash {self.sha256}>"
+
+
 class DBfile(Base):
     __tablename__ = 'files'
 
-    sha256 = Column(String(64), primary_key=True)
+    id = Column(Integer, primary_key=True)
+    sha256 = Column(String(64), ForeignKey('hashes.sha256'))
     size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
     path = Column(String, nullable=False)
+    __table_args__ = (UniqueConstraint('sha256', 'name', 'size'),)
 
     def __repr__(self):
         return f"<File {self.sha256}>"
@@ -161,7 +174,7 @@ class DBsrcpkg(Base):
 
     name = Column(String, primary_key=True)
     version = Column(String, primary_key=True)
-    files = relationship("DBfile", secondary=SrcpkgFiles)
+    hashes = relationship("DBhash", secondary=SrcpkgFiles)
 
     def __repr__(self):
         return f"<Package {self.name}-{self.version}>"
@@ -172,54 +185,7 @@ class DBbinpkg(Base):
 
     name = Column(String, primary_key=True)
     version = Column(String, primary_key=True)
-    files = relationship("BinpkgFiles")
+    hashes = relationship("BinpkgFiles")
 
     def __repr__(self):
         return f"<Binary {self.name}-{self.version}>"
-
-
-# Temporary tables for DB provisioning
-
-
-class DBtempfile(Base):
-    __tablename__ = 'tempfiles'
-    __table_args__ = {'prefixes': ['UNLOGGED']}
-
-    sha256 = Column(String(64), primary_key=True)
-    size = Column(BigInteger, nullable=False)
-    name = Column(String, nullable=False)
-    path = Column(String, nullable=False)
-    archive_name = Column(String, primary_key=True)
-    timestamp_value = Column(String, primary_key=True)
-    suite_name = Column(String, primary_key=True)
-    component_name = Column(String, primary_key=True)
-
-    def __repr__(self):
-        return f"<TempFile {self.sha256}>"
-
-
-class DBtempsrcpkg(Base):
-    __tablename__ = 'tempsrcpkg'
-    __table_args__ = {'prefixes': ['UNLOGGED']}
-
-    srcpkg_id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    version = Column(String, nullable=False)
-    file_sha256 = Column(String, nullable=False)
-
-    def __repr__(self):
-        return f"<TempPackage {self.name}-{self.version}>"
-
-
-class DBtempbinpkg(Base):
-    __tablename__ = 'tempbinpkg'
-    __table_args__ = {'prefixes': ['UNLOGGED']}
-
-    binpkg_id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False)
-    version = Column(String, nullable=False)
-    file_sha256 = Column(String, nullable=False)
-    architecture = Column(String, nullable=False)
-
-    def __repr__(self):
-        return f"<TempBinary {self.name}-{self.version}>"

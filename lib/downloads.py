@@ -107,7 +107,7 @@ def download_with_retry(url, path, sha256=None):
         #     os.remove(tmp_path)
         raise Exception(f"{os.path.basename(url)}: wrong SHA256: {tmp_sha256} != {sha256}")
     os.rename(tmp_path, path)
-    return path
+    return sha256
 
 
 @retry(
@@ -151,13 +151,16 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
                 os.remove(tmp_path)
             raise Exception(f"{fname}: wrong SHA256: {tmp_sha256} (expected: {sha256})")
         os.rename(tmp_path, path)
+        sha256 = tmp_sha256
     elif file_size == -1:
         raise Exception(f"{f}: failed to get 'Content-Length': {url}")
+
+    return sha256
 
 
 def download_with_retry_and_resume_threshold(url, path, size=None, sha256=None, no_clean=False):
     # For file less than MAX_DIRECT_DOWNLOAD_SIZE we do a direct download
     if size is not None and int(size) <= MAX_DIRECT_DOWNLOAD_SIZE * 1000 * 1000:
-        download_with_retry(url, path, sha256=sha256)
+        return download_with_retry(url, path, sha256=sha256)
     else:
-        download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean, file_size=size)
+        return download_with_retry_and_resume(url, path, sha256=sha256, no_clean=no_clean, file_size=size)

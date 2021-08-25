@@ -19,7 +19,6 @@
 
 import argparse
 import re
-import requests
 
 import debian.deb822
 import hashlib
@@ -32,13 +31,17 @@ from dateutil.parser import parse as parsedate
 
 from lib.log import logger
 from lib.common import parse_ts, sha256sum
-from lib.exceptions import SnapshotException, SnapshotRepodataNotFoundException
+from lib.exceptions import SnapshotException
 from lib.downloads import url_exists, get_file_size, \
     get_response_with_retry, download_with_retry_and_resume_threshold
 from lib.timestamps import get_timestamps_from_file
 
-from db import DBrepodata, DBarchive, DBtimestamp, DBcomponent, DBsuite, \
-    DBarchitecture, db_create_session, DBtempfile, DBtempsrcpkg, DBtempbinpkg
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import func
+
+from db import DBarchive, DBtimestamp, DBrepodata, DBcomponent, DBsuite, DBarchitecture, \
+    DBfile, DBsrcpkg, DBbinpkg, DBhash, HashesLocations, ArchivesTimestamps, SrcpkgFiles, BinpkgFiles, \
+    db_create_session
 #
 # Debian
 #
@@ -58,21 +61,36 @@ QUBES_ARCHIVES = {"qubes-r4.1-vm"}
 
 
 class File:
-    def __init__(self, name, version, architecture, archive, timestamp, suite, component, size, sha256, relative_path, url):
+    def __init__(self, archive, timestamp, path, localfile, remotefiles,
+                 size=None, sha256=None):
+        self.archive = archive
+        self.timestamp = timestamp
+        self.path = path
+        self.localfile = localfile
+        self.remotefiles = remotefiles
+        self.size = size
+        self.sha256 = sha256
+
+    def __repr__(self):
+        return self.to_str()
+
+    def to_str(self):
+        path = self.path
+        if self.path.startswith('/'):
+            path = self.path[1:]
+        return f"{self.archive}:{self.timestamp}:{re.sub('[^A-Za-z0-9-_]+', '-', path)}"
+
+
+class Package(File):
+    def __init__(self, name, version, architecture, archive, timestamp, suite, component, size,
+                 sha256, path, localfile, remotefiles):
+        super().__init__(archive=archive, timestamp=timestamp, path=path, localfile=localfile,
+                         remotefiles=remotefiles, size=size, sha256=sha256)
         self.name = name
         self.version = version
         self.architecture = architecture
-        self.archive = archive
-        self.timestamp = timestamp
         self.suite = suite
         self.component = component
-        self.size = size
-        self.sha256 = sha256
-        self.relative_path = relative_path
-        self.url = url
-
-    def __repr__(self):
-        return f"{self.archive}:{self.timestamp}:{os.path.basename(self.relative_path)}"
 
 
 class SnapshotCli:
@@ -89,256 +107,6 @@ class SnapshotCli:
 
         self.map_srcpkg_hash = {}
         self.map_binpkg_hash = {}
-
-    def provision_database(self, archive, timestamp, suites, components, arches, ignore_provisioned=False):
-        session = db_create_session()
-        to_add = []
-        to_add_suites = {}
-        to_add_components = {}
-        to_add_architectures = {}
-        to_add_files = {}
-        try:
-            db_archive = session.query(DBarchive).get(archive)
-            if not db_archive:
-                db_archive = DBarchive(name=archive)
-                to_add.append(db_archive)
-
-            logger.info(f"Provision database for timestamp: {timestamp}")
-            # we convert timestamp to a SQL format
-            parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
-            db_timestamp = session.query(DBtimestamp).get(parsed_ts)
-            if not db_timestamp:
-                db_timestamp = DBtimestamp(value=parsed_ts)
-                to_add.append(db_timestamp)
-
-            for suite in suites:
-                db_suite = session.query(DBsuite).get(suite)
-                if not db_suite and not to_add_suites.get(suite, None):
-                    db_suite = DBsuite(name=suite)
-                    to_add_suites[suite] = db_suite
-                for component in components:
-                    db_component = session.query(DBcomponent).get(component)
-                    if not db_component and not to_add_components.get(component, None):
-                        db_component = DBcomponent(name=component)
-                        to_add_components[component] = db_component
-                    for arch in arches:
-                        db_architecture = session.query(DBarchitecture).get(arch)
-                        if not db_architecture and not to_add_architectures.get(arch, None):
-                            db_architecture = DBarchitecture(name=arch)
-                            to_add_architectures[arch] = db_architecture
-                        if arch == "source":
-                            packages = f"{arch}/Sources.gz"
-                        else:
-                            packages = f"binary-{arch}/Packages.gz"
-                        repodata = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/{packages}"
-                        repodata_path = f"{self.localdir}/{repodata}"
-                        logger.debug(f"Processing {repodata_path}")
-
-                        # Check if we already provisioned DB with
-                        repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
-                        db_repodata = session.query(DBrepodata).get(repodata_id)
-                        if not ignore_provisioned and db_repodata:
-                            session.close()
-                            continue
-                        if not os.path.exists(repodata_path):
-                            logger.error(f"Cannot find {repodata_path}.")
-                            continue
-                        with open(repodata_path) as fd:
-                            if arch == "source":
-                                for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
-                                    for src_file in raw_pkg["Checksums-Sha256"]:
-                                        file_ref = src_file['sha256'] + suite + component
-                                        if not to_add_files.get(file_ref, None):
-                                            db_file = DBtempfile(
-                                                sha256=src_file['sha256'],
-                                                size=int(src_file['size']),
-                                                name=src_file['name'],
-                                                path="/" + raw_pkg['Directory'],
-                                                archive_name=archive,
-                                                timestamp_value=parsed_ts,
-                                                suite_name=suite,
-                                                component_name=component
-                                            )
-                                            to_add_files[file_ref] = db_file
-                                        db_srcpkg = DBtempsrcpkg(
-                                            name=raw_pkg['Package'],
-                                            version=raw_pkg['Version'],
-                                            file_sha256=src_file["sha256"])
-                                        to_add.append(db_srcpkg)
-                            else:
-                                for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                                    file_ref = raw_pkg['SHA256'] + suite + component
-                                    if not to_add_files.get(file_ref, None):
-                                        db_file = DBtempfile(
-                                            sha256=raw_pkg['SHA256'],
-                                            size=int(raw_pkg['Size']),
-                                            name=os.path.basename(raw_pkg['Filename']),
-                                            path="/" + os.path.dirname(raw_pkg['Filename']),
-                                            archive_name=archive,
-                                            timestamp_value=parsed_ts,
-                                            suite_name=suite,
-                                            component_name=component
-                                        )
-                                        to_add_files[file_ref] = db_file
-                                    db_binpkg = DBtempbinpkg(
-                                        name=raw_pkg['Package'],
-                                        version=raw_pkg['Version'],
-                                        file_sha256=raw_pkg["SHA256"],
-                                        architecture=raw_pkg['Architecture'])
-                                    to_add.append(db_binpkg)
-                        if not db_repodata:
-                            to_add.append(DBrepodata(id=repodata_id))
-
-            # workaround "all" needed in non-"all" packages
-            db_architecture = session.query(DBarchitecture).get("all")
-            if not db_architecture and not to_add_architectures.get("all", None):
-                db_architecture = DBarchitecture(name="all")
-                to_add_architectures["all"] = db_architecture
-
-            to_add_suites = list(to_add_suites.values())
-            to_add_components = list(to_add_components.values())
-            to_add_architectures = list(to_add_architectures.values())
-            to_add_files = list(to_add_files.values())
-
-            if to_add_suites:
-                logger.debug(f"Commit to DBsuite: {len(to_add_suites)}")
-                session.add_all(to_add_suites)
-                session.commit()
-
-            if to_add_components:
-                logger.debug(f"Commit to DBcomponent: {len(to_add_components)}")
-                session.add_all(to_add_components)
-                session.commit()
-
-            if to_add_architectures:
-                logger.debug(f"Commit to DBarchitecture: {len(to_add_architectures)}")
-                session.add_all(to_add_architectures)
-                session.commit()
-
-            if to_add:
-                logger.debug(f"Commit to DBarchive, DBtimestamp, DBsrcpkg, DBbinpkg, DBrepodata: {len(to_add)}")
-                session.add_all(to_add)
-                session.commit()
-
-            stmt_insert_new_timestamp_to_archive = f"""
-            INSERT INTO archives_timestamps (archive_name, timestamp_value)
-            VALUES ('{archive}', '{parsed_ts}')
-            ON CONFLICT DO NOTHING
-            """
-            session.execute(stmt_insert_new_timestamp_to_archive)
-            session.commit()
-
-            # This function is triggered only ON CONFLICT in files_locations
-            # table. In consequence, there exists always at least one non-empty
-            # array 'ranges' and also at least one previous timestamp with
-            # respect to current provisioned one.
-            stmt_create_replace_timestamps_ranges = f"""
-            CREATE OR REPLACE FUNCTION 
-            get_timestamps_ranges (ranges text[])
-                RETURNS text[]
-            AS $$
-                from dateutil.parser import parse as parsedate
-
-                current_timestamp = '{parsed_ts}'
-                # Create query for getting previous timestamp with respect
-                # to provisioned one 'current_timestamp'
-                query = "SELECT value FROM timestamps WHERE value < '"+current_timestamp+"' ORDER BY value DESC LIMIT 1"
-                rv = plpy.execute(query)
-                previous_timestamp = None
-                if rv and rv[0].get("value", None):
-                    previous_timestamp = rv[0]["value"]
-
-                # Current timestamp range of the archive
-                backward_range = [previous_timestamp, current_timestamp]
-
-                # Check if a file has its latest provisioned timestamp being
-                # the previous timestamp in the archive's timestamps. Else,
-                # there is a gap (unfortunately, that happens) and the file
-                # is missing in previous provisioned timestamps.
-                # In this case, we add a singleton range.
-                updated_ranges = ranges.copy()
-                for i, _ in enumerate(updated_ranges):
-                    if parsedate(updated_ranges[i][0]) <= parsedate(current_timestamp) <= parsedate(updated_ranges[i][1]):
-                        break
-                    elif [updated_ranges[i][1], backward_range[1]] == backward_range:
-                        updated_ranges[i][1] = backward_range[1]
-                        if i+1 != len(updated_ranges) and updated_ranges[i][1] == updated_ranges[i+1][0]:
-                            updated_ranges[i+1][0] = updated_ranges[i][0]
-                            updated_ranges.pop(i)
-                    elif parsedate(current_timestamp) < parsedate(updated_ranges[i][0]):
-                        updated_ranges.insert(i, [current_timestamp, current_timestamp])
-                    elif parsedate(updated_ranges[i][1]) < parsedate(current_timestamp) and i+1 == len(updated_ranges):
-                        updated_ranges.insert(i+1, [current_timestamp, current_timestamp])
-                    else:
-                        continue
-                    break
-                return updated_ranges
-            $$ LANGUAGE plpython3u;
-            """
-            session.execute(stmt_create_replace_timestamps_ranges)
-            session.commit()
-
-            if to_add_files:
-                logger.debug(f"Commit to DBfile: {len(to_add_files)}")
-                session.add_all(to_add_files)
-                session.commit()
-
-                stmt_insert_new_file = """
-                INSERT INTO files (sha256, size, name, path)
-                SELECT t.sha256, t.size, t.name, t.path FROM tempfiles t
-                ON CONFLICT DO NOTHING
-                """
-                session.execute(stmt_insert_new_file)
-                session.commit()
-
-                stmt_insert_new_location_to_file = """
-                INSERT INTO files_locations (file_sha256, archive_name, suite_name, component_name, timestamp_ranges)
-                SELECT t.sha256, t.archive_name, t.suite_name, t.component_name, ARRAY[ARRAY[t.timestamp_value, t.timestamp_value]]
-                FROM tempfiles t
-                ON CONFLICT (file_sha256, archive_name, suite_name, component_name) DO UPDATE
-                SET timestamp_ranges = get_timestamps_ranges(files_locations.timestamp_ranges)
-                """
-                session.execute(stmt_insert_new_location_to_file)
-                session.commit()
-
-                if "source" in arches:
-                    stmt_insert_new_srcpkg = """
-                    INSERT INTO srcpkg (name, version)
-                    SELECT t.name, t.version FROM tempsrcpkg t
-                    ON CONFLICT DO NOTHING
-                    """
-                    session.execute(stmt_insert_new_srcpkg)
-                    session.commit()
-
-                    stmt_append_new_file_to_srcpkg = """
-                    INSERT INTO srcpkg_files (srcpkg_name, srcpkg_version, file_sha256)
-                    SELECT t.name, t.version, t.file_sha256 FROM tempsrcpkg t
-                    ON CONFLICT DO NOTHING
-                    """
-                    session.execute(stmt_append_new_file_to_srcpkg)
-                    session.commit()
-
-                if len([arch for arch in arches if arch != "source"]) > 0:
-                    stmt_insert_new_binpkg = """
-                    INSERT INTO binpkg (name, version)
-                    SELECT t.name, t.version FROM tempbinpkg t
-                    ON CONFLICT DO NOTHING
-                    """
-                    session.execute(stmt_insert_new_binpkg)
-                    session.commit()
-
-                    stmt_append_new_file_to_binpkg = """
-                    INSERT INTO binpkg_files (binpkg_name, binpkg_version, file_sha256, architecture)
-                    SELECT t.name, t.version, t.file_sha256, t.architecture FROM tempbinpkg t
-                    ON CONFLICT DO NOTHING
-                    """
-                    session.execute(stmt_append_new_file_to_binpkg)
-                    session.commit()
-        finally:
-            session.close()
-            DBtempfile.__table__.drop()
-            DBtempsrcpkg.__table__.drop()
-            DBtempbinpkg.__table__.drop()
 
     def get_timestamps(self, archive="debian"):
         """
@@ -365,72 +133,6 @@ class SnapshotCli:
             timestamps = get_timestamps_from_file(self.localdir, archive)
         return timestamps
 
-    def get_files(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN):
-        """"
-        Get a parsed files list from Packages.gz or Sources.gz repository file
-        """
-        files = {}
-        if arch == "source":
-            repodata_list = [f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"]
-        else:
-            repodata_list = [
-                f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz",
-            ]
-            installer_packages = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}/Packages.gz"
-            if os.path.exists(installer_packages):
-                repodata_list.append(installer_packages)
-        try:
-            for repodata in repodata_list:
-                with open(repodata) as fd:
-                    if arch == "source":
-                        for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
-                            for src_file in raw_pkg["Checksums-Sha256"]:
-                                pkg = File(
-                                    name=raw_pkg["Package"],
-                                    version=raw_pkg["Version"],
-                                    architecture="source",
-                                    archive=archive,
-                                    timestamp=timestamp,
-                                    suite=suite,
-                                    component=component,
-                                    size=src_file["size"],
-                                    sha256=src_file["sha256"],
-                                    relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}",
-                                    url=[
-                                        f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
-                                    ]
-                                )
-                                snapshot_debian_hash = self.map_srcpkg_hash.get(os.path.basename(src_file['name']), None)
-                                if snapshot_debian_hash:
-                                    file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
-                                    pkg.url.insert(0, file_url)
-                                files[src_file["sha256"]] = pkg
-                    else:
-                        for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
-                            pkg = File(
-                                name=raw_pkg["Package"],
-                                version=raw_pkg["Version"],
-                                architecture=raw_pkg["Architecture"],
-                                archive=archive,
-                                timestamp=timestamp,
-                                suite=suite,
-                                component=component,
-                                size=raw_pkg['Size'],
-                                sha256=raw_pkg["SHA256"],
-                                relative_path=f"archive/{archive}/{timestamp}/{raw_pkg['Filename']}",
-                                url=[
-                                    f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
-                                ],
-                            )
-                            snapshot_debian_hash = self.map_binpkg_hash.get(os.path.basename(raw_pkg['Filename']), None)
-                            if snapshot_debian_hash:
-                                file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
-                                pkg.url.insert(0, file_url)
-                            files[raw_pkg["SHA256"]] = pkg
-        except Exception as e:
-            logger.error(str(e))
-        return files
-
     @staticmethod
     def get_hashes_from_page(url):
         resp = get_response_with_retry(url)
@@ -440,6 +142,18 @@ class SnapshotCli:
             hashes = dict((x, y) for x, y in re.findall(link_regex, resp.text))
         return hashes
 
+    # This function is useful only if we want to download the whole data from snapshot.d.o
+    def init_snapshot_db_hash(self):
+        if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):
+            import csv
+            with open('/home/user/db/map_srcpkg_hash.csv', newline='') as fd:
+                for row in csv.reader(fd, delimiter=',', quotechar='|'):
+                    self.map_srcpkg_hash[row[0]] = row[1]
+            with open('/home/user/db/map_binpkg_hash.csv', newline='') as fd:
+                for row in csv.reader(fd, delimiter=',', quotechar='|'):
+                    self.map_binpkg_hash[row[0]] = row[1]
+
+    # Download function
     def download(self, fname, url, sha256=None, size=None, no_clean=False, compute_size=False):
         """
         Download function to store file according to its SHA256
@@ -455,15 +169,12 @@ class SnapshotCli:
                 try:
                     if compute_size:
                         size = get_file_size(url)
-                    download_with_retry_and_resume_threshold(url, fname_sha256, size=size, sha256=sha256, no_clean=no_clean)
+                    sha256 = download_with_retry_and_resume_threshold(url, fname_sha256, size=size, sha256=sha256, no_clean=no_clean)
                 except Exception as e:
                     raise SnapshotException(f"Failed to download file: {str(e)}")
         else:
-            if os.path.exists(fname):
-                return
             tmp_path = f"{self.localdir}/by-hash/SHA256/{uuid.uuid4()}.tmp"
-            download_with_retry_and_resume_threshold(url, tmp_path)
-            sha256 = sha256sum(tmp_path)
+            sha256 = download_with_retry_and_resume_threshold(url, tmp_path)
             if not sha256:
                 raise SnapshotException(f"Failed to get SHA256: {url}")
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{sha256}"
@@ -478,175 +189,622 @@ class SnapshotCli:
             os.makedirs(os.path.dirname(fname), exist_ok=True)
             os.symlink(os.path.relpath(fname_sha256, os.path.dirname(fname)), fname)
 
-        return fname
+        return sha256
 
-    def download_repodata(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
-        """
-        Download Packages.gz or Sources.gz
-        """
-        if arch == "source":
-            repodata = f"{arch}/Sources.gz"
-        else:
-            repodata = f"binary-{arch}/Packages.gz"
-        f = f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{repodata}"
-        localfile = self.localdir + f
-        remotefile = f"{baseurl}{f}"
-        logger.debug(remotefile)
-        if not url_exists(remotefile):
-            logger.error(f"Cannot find {remotefile}")
-            raise SnapshotRepodataNotFoundException(f)
-        if os.path.exists(localfile) and force:
-            os.remove(localfile)
-        self.download(localfile, remotefile)
-
-    def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
-        """
-        Download repository Release files and translation
-        """
-        if arch != "source":
-            arch = f"binary-{arch}"
-        metadata_files = [
-            f"/archive/{archive}/{timestamp}/dists/{suite}/Release",
-            f"/archive/{archive}/{timestamp}/dists/{suite}/Release.gpg",
-            f"/archive/{archive}/{timestamp}/dists/{suite}/InRelease",
-            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Release"
-        ]
-        for f in metadata_files:
-            localfile = self.localdir + f
-            remotefile = f"{baseurl}{f}"
-            logger.debug(remotefile)
-            if not url_exists(remotefile):
-                logger.error(f"Cannot find {remotefile}")
-                continue
-            if os.path.exists(localfile) and force:
-                os.remove(localfile)
-            self.download(localfile, remotefile)
-
-    def download_translation(self, archive, timestamp, suite, component):
-        """
-        Download repository Translation files
-        """
-        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n"
-        translation_files = [
-            "Translation-en.bz2",
-            "Translation-en.xz"
-        ]
-        hashes = self.get_hashes_from_page(f"{SNAPSHOT_DEBIAN}/{base_url}")
-        for f in translation_files:
-            localfile = f"{self.localdir}/{base_url}/{f}"
-            remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
-            logger.debug(remotefile)
-            if not url_exists(remotefile):
-                logger.error(f"Cannot find {remotefile}")
-                continue
-            if os.path.exists(localfile):
-                continue
-            self.download(localfile, remotefile, sha256=hashes.get(f, None))
-
-    def download_dep11(self, archive, timestamp, suite, component, arches):
-        """
-        Download dep11 repository files
-        """
-        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/dep11"
-        files = [
-            "icons-48x48.tar.gz",
-            "icons-64x64.tar.gz",
-            "icons-128x128.tar.gz",
-            "icons-48x48@2.tar.gz",
-            "icons-64x64@2.tar.gz",
-            "icons-128x128@2.tar.gz",
-        ]
-        for arch in arches:
-            if arch not in ("source", "all"):
-                files += [
-                    f"CID-Index-{arch}.json.gz",
-                    f"Components-{arch}.yml.gz"
-                ]
-        hashes = self.get_hashes_from_page(f"{SNAPSHOT_DEBIAN}/{base_url}")
-        for f in files:
-            localfile = f"{self.localdir}/{base_url}/{f}"
-            remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/{f}"
-            logger.debug(remotefile)
-            if not url_exists(remotefile):
-                logger.error(f"Cannot find {remotefile}")
-                continue
-            if os.path.exists(localfile):
-                continue
-            self.download(localfile, remotefile, sha256=hashes.get(f, None))
-
-    def download_installer(self, archive, timestamp, suite, component, arch):
-        """
-        Download installer files
-        """
-        base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}"
-        files = {}
-        if arch != "source":
-            repodata_files = ["Packages.gz", "Release"]
-            for f in repodata_files:
-                localfile = f"{self.localdir}/{base_url}/debian-installer/binary-{arch}/{f}"
-                remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/debian-installer/binary-{arch}/{f}"
-                logger.debug(remotefile)
-                if not url_exists(remotefile):
-                    logger.error(f"Cannot find {remotefile}")
-                    continue
-                if os.path.exists(localfile):
-                    continue
-                self.download(localfile, remotefile)
-        if arch not in ("source", "all"):
-            localfile_sha256sums = f"{self.localdir}/{base_url}/installer-{arch}/current/images/SHA256SUMS"
-            remotefile_sha256sums = f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/SHA256SUMS"
-            if not url_exists(remotefile_sha256sums):
-                logger.error(f"Cannot find {remotefile_sha256sums}")
-                return
-            self.download(localfile_sha256sums, remotefile_sha256sums)
-            with open(localfile_sha256sums, 'r') as fd:
-                for f in fd.readlines():
-                    key, val = f.split()
-                    files.setdefault(key, []).append(val[2:])
-            for sha256, files in files.items():
-                for f in files:
-                    # files has the same hash, it is downloading once then creates symlinks
-                    localfile = f"{self.localdir}/{base_url}/installer-{arch}/current/images/{f}"
-                    urls = [
-                        f"https://ftp.debian.org/{archive}/dists/{suite}/{component}/installer-{arch}/current/images/{f}",
-                        f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/{f}"
-                    ]
-                    for url in urls:
-                        try:
-                            logger.debug(url)
-                            if os.path.exists(localfile):
-                                break
-                            if not url_exists(url):
-                                logger.error(f"Cannot find {url}")
-                                continue
-                            self.download(localfile, url, sha256=sha256, compute_size=True)
-                            break
-                        except Exception as e:
-                            logger.debug(f"Retry with another URL ({str(e)})")
-
-    def download_file(self, file, check_only, no_clean):
+    # Download a "File"
+    def download_file(self, file, check_only=False, no_clean=False):
         logger.info(file)
         if check_only:
+            if not file.sha256:
+                logger.info(f"No SHA256 info for {file}")
+                return
             fname_sha256 = f"{self.localdir}/by-hash/SHA256/{file.sha256}"
             if not os.path.exists(fname_sha256):
                 logger.info(f"MISSING: {file}")
                 return
             if sha256sum(fname_sha256) != file.sha256:
                 raise SnapshotException(
-                    f"Wrong SHA256 for: {fname_sha256}")
+                    f"Wrong SHA256 for {fname_sha256}")
         else:
-            result = None
-            localfile = f"{self.localdir}/{file.relative_path}"
             size = int(file.size) if file.size is not None else None
-            for url in file.url:
+            sha256 = file.sha256
+            for url in file.remotefiles:
                 try:
                     # logger.debug(f"Try with URL ({url})")
-                    result = self.download(localfile, url, file.sha256, size=size, no_clean=no_clean)
+                    sha256 = self.download(file.localfile, url, sha256=file.sha256, size=size, no_clean=no_clean, compute_size=size == -1)
                     break
                 except Exception as e:
                     logger.debug(f"Retry with another URL ({str(e)})")
-            if not result:
-                raise SnapshotException("No more URL to try")
+            if not sha256:
+                raise SnapshotException(f"No more URL to try for {file}")
+            return sha256
+
+    # Download "dists" content in a Debian repository
+    def download_distfiles(self, archive, timestamp, suites, components, architectures, baseurl=SNAPSHOT_DEBIAN, force=False, provision_db_only=False, download_installer_files=True):
+        """
+        Download repodata (index, translations, i18n, dep11, etc.)
+        """
+        distfiles = {}
+        for suite in suites:
+            distfiles[suite] = {}
+            # not component specific
+            distfiles[suite]["all"] = {}
+
+            # Release files
+            suite_path = f"archive/{archive}/{timestamp}/dists/{suite}"
+            release_files = [
+                f"Release",
+                f"Release.gpg",
+                f"InRelease"
+            ]
+            hashes_suite_path = self.get_hashes_from_page(f"{baseurl}/{suite_path}")
+            for f in release_files:
+                release_file = File(
+                    archive=archive,
+                    timestamp=timestamp,
+                    path=f"dists/{suite}/{f}",
+                    localfile=f"{self.localdir}/{suite_path}/{f}",
+                    remotefiles=[f"{baseurl}/{suite_path}/{f}"],
+                    sha256=hashes_suite_path.get(f, None)
+                )
+                distfiles[suite]["all"][release_file.to_str()] = release_file
+
+            for component in components:
+                distfiles[suite][component] = []
+                files = {}
+
+                # Release component files
+                release_files = []
+                for arch in architectures:
+                    if arch == "source":
+                        release_arch_path = "source"
+                    else:
+                        release_arch_path = f"binary-{arch}"
+                    release_files.append(f"{component}/{release_arch_path}/Release")
+                for f in release_files:
+                    release_file = File(
+                        archive=archive,
+                        timestamp=timestamp,
+                        path=f"dists/{suite}/{f}",
+                        localfile=f"{self.localdir}/{suite_path}/{f}",
+                        remotefiles=[f"{baseurl}/{suite_path}/{f}"],
+                        sha256=hashes_suite_path.get(f, None),
+                    )
+                    files[release_file.to_str()] = release_file
+
+                # Repository packages
+                for arch in architectures:
+                    if arch == "source":
+                        basepath = f"dists/{suite}/{component}/{arch}"
+                        repodata = "Sources.gz"
+                    else:
+                        basepath = f"dists/{suite}/{component}/binary-{arch}"
+                        repodata = "Packages.gz"
+                    dist = f"archive/{archive}/{timestamp}/{basepath}"
+                    hashes = self.get_hashes_from_page(f"{baseurl}/{dist}")
+                    repodata_file = File(
+                        archive=archive,
+                        timestamp=timestamp,
+                        path=f"/{basepath}/{repodata}",
+                        localfile=f"{self.localdir}/{dist}/{repodata}",
+                        remotefiles=[f"{baseurl}/{dist}/{repodata}"],
+                        sha256=hashes.get(repodata, None),
+                    )
+                    files[repodata_file.to_str()] = repodata_file
+
+                # Translations
+                i18n = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n"
+                translation_files = [
+                    "Translation-en.bz2"
+                ]
+                hashes = self.get_hashes_from_page(f"{baseurl}/{i18n}")
+                for f in translation_files:
+                    translation_file = File(
+                        archive=archive,
+                        timestamp=timestamp,
+                        path=f"dists/{suite}/{component}/i18n/{f}",
+                        localfile=f"{self.localdir}/{i18n}/{f}",
+                        remotefiles=[f"{baseurl}/{i18n}/{f}"],
+                        sha256=hashes.get(f, None),
+                    )
+                    files[translation_file.to_str()] = translation_file
+
+                # Dep11
+                dep11 = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/dep11"
+                dep11_files = [
+                    "icons-48x48.tar.gz",
+                    "icons-64x64.tar.gz",
+                    "icons-128x128.tar.gz",
+                    "icons-48x48@2.tar.gz",
+                    "icons-64x64@2.tar.gz",
+                    "icons-128x128@2.tar.gz",
+                ]
+                for arch in architectures:
+                    if arch not in ("source", "all"):
+                        dep11_files += [
+                            f"CID-Index-{arch}.json.gz",
+                            f"Components-{arch}.yml.gz"
+                        ]
+                hashes = self.get_hashes_from_page(f"{baseurl}/{dep11}")
+                for f in dep11_files:
+                    dep11_file = File(
+                        archive=archive,
+                        timestamp=timestamp,
+                        path=f"dists/{suite}/{component}/dep11/{f}",
+                        localfile=f"{self.localdir}/{dep11}/{f}",
+                        remotefiles=[f"{baseurl}/{dep11}/{f}"],
+                        sha256=hashes.get(f, None),
+                    )
+                    files[dep11_file.to_str()] = dep11_file
+
+                # installer related content
+                for arch in architectures:
+                    if arch != "source" and download_installer_files:
+                        debian_installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}"
+                        hashes = self.get_hashes_from_page(f"{baseurl}/{debian_installer}")
+                        for f in ["Packages.gz", "Release"]:
+                            installer_file = File(
+                                archive=archive,
+                                timestamp=timestamp,
+                                path=f"{self.localdir}/{debian_installer}/{f}",
+                                localfile=f"{self.localdir}/{debian_installer}/{f}",
+                                remotefiles=[f"{baseurl}/{debian_installer}/{f}"],
+                                sha256=hashes.get(f, None)
+                            )
+                            files[installer_file.to_str()] = installer_file
+
+                    if arch not in ("source", "all"):
+                        parsed_files = {}
+                        installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/installer-{arch}"
+                        installer_localfile_sha256sums = f"{self.localdir}/{installer}/current/images/SHA256SUMS"
+                        installer_remote_sha256sums = f"{SNAPSHOT_DEBIAN}/{installer}/current/images/SHA256SUMS"
+                        if not os.path.exists(installer_localfile_sha256sums):
+                            if not url_exists(installer_remote_sha256sums):
+                                logger.error(f"Cannot find {installer_remote_sha256sums}")
+                                continue
+                            # We download it before
+                            shasums_sha256 = self.download(installer_localfile_sha256sums, installer_remote_sha256sums)
+                            shasums_file = File(
+                                archive=archive,
+                                timestamp=timestamp,
+                                path=f"dists/{suite}/{component}/installer-{arch}/current/images/SHA256SUMS",
+                                localfile=installer_localfile_sha256sums,
+                                remotefiles=[installer_remote_sha256sums],
+                                sha256=shasums_sha256,
+                                size=os.path.getsize(installer_localfile_sha256sums)
+                            )
+                            files[shasums_file.to_str()] = shasums_file
+                        with open(installer_localfile_sha256sums, 'r') as fd:
+                            for f in fd.readlines():
+                                key, val = f.split()
+                                parsed_files.setdefault(key, []).append(val[2:])
+                        for sha256, installer_files in parsed_files.items():
+                            for f in installer_files:
+                                installer_file = File(
+                                    archive=archive,
+                                    timestamp=timestamp,
+                                    path=f"dists/{suite}/{component}/installer-{arch}/current/images/{f}",
+                                    localfile=f"{self.localdir}/{installer}/current/images/{f}",
+                                    remotefiles=[
+                                        f"{FTP_DEBIAN}/{archive}/dists/{suite}/{component}/installer-{arch}/current/images/{f}",
+                                        f"{baseurl}/{installer}/current/images/{f}"
+                                    ],
+                                    sha256=sha256,
+                                    size=-1
+                                )
+                                files[installer_file.to_str()] = installer_file
+
+                if not provision_db_only:
+                    # Download repository files
+                    for file in files.values():
+                        logger.debug(file.remotefiles[0])
+                        if os.path.exists(file.localfile) and force:
+                            os.remove(file.localfile)
+                        # e.g. a suite may not exist depending of the timestamps
+                        if not url_exists(file.remotefiles[0]):
+                            logger.error(f"Cannot find {file.remotefiles[0]}")
+                            continue
+                        # update sha256 from downloaded file
+                        # this is for storing value in DB
+                        file.sha256 = self.download_file(file)
+                        distfiles[suite][component].append(file)
+        return distfiles
+
+    # Download "pool" content in a Debian repository
+    def download_poolfiles(self, archive, timestamp, suites, components, architectures, baseurl=SNAPSHOT_DEBIAN, provision_db_only=False):
+        """"
+        Download parsed files from Packages.gz or Sources.gz repository file
+        """
+        poolfiles = {}
+        for suite in suites:
+            poolfiles[suite] = {}
+            for component in components:
+                poolfiles[suite][component] = {}
+                for arch in architectures:
+                    poolfiles[suite][component][arch] = []
+                    if arch == "source":
+                        repodata_list = [f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}/Sources.gz"]
+                    else:
+                        # TODO: We currently ignore Packages.gz for debian-installer until we rework
+                        # the service from scratch (again) with a better approach to store files in
+                        # DB like original snapshot.d.o.
+                        repodata_list = [
+                            f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz",
+                            # f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}/Packages.gz"
+                        ]
+                    try:
+                        for repodata in repodata_list:
+                            with open(repodata) as fd:
+                                if arch == "source":
+                                    for raw_pkg in debian.deb822.Sources.iter_paragraphs(fd):
+                                        for src_file in raw_pkg["Checksums-Sha256"]:
+                                            pkg = Package(
+                                                name=raw_pkg["Package"],
+                                                version=raw_pkg["Version"],
+                                                architecture="source",
+                                                archive=archive,
+                                                timestamp=timestamp,
+                                                suite=suite,
+                                                component=component,
+                                                size=src_file["size"],
+                                                sha256=src_file["sha256"],
+                                                path=f"{raw_pkg['Directory']}/{src_file['name']}",
+                                                localfile=f"{self.localdir}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}",
+                                                remotefiles=[
+                                                    # f"{FTP_DEBIAN}/{archive}/{raw_pkg['Directory']}/{src_file['name']}",
+                                                    f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Directory']}/{src_file['name']}"
+                                                ]
+                                            )
+                                            snapshot_debian_hash = self.map_srcpkg_hash.get(os.path.basename(src_file['name']), None)
+                                            if snapshot_debian_hash:
+                                                file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
+                                                pkg.remotefiles.insert(0, file_url)
+                                            # poolfiles[suite][component][arch].setdefault(src_file["sha256"], [])
+                                            poolfiles[suite][component][arch].append(pkg)
+                                else:
+                                    for raw_pkg in debian.deb822.Packages.iter_paragraphs(fd):
+                                        pkg = Package(
+                                            name=raw_pkg["Package"],
+                                            version=raw_pkg["Version"],
+                                            architecture=raw_pkg["Architecture"],
+                                            archive=archive,
+                                            timestamp=timestamp,
+                                            suite=suite,
+                                            component=component,
+                                            size=raw_pkg['Size'],
+                                            sha256=raw_pkg["SHA256"],
+                                            path=f"{raw_pkg['Filename']}",
+                                            localfile=f"{self.localdir}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}",
+                                            remotefiles=[
+                                                # f"{FTP_DEBIAN}/{archive}/{raw_pkg['Filename']}",
+                                                f"{baseurl}/archive/{archive}/{timestamp}/{raw_pkg['Filename']}"
+                                            ],
+                                        )
+                                        snapshot_debian_hash = self.map_binpkg_hash.get(os.path.basename(raw_pkg['Filename']), None)
+                                        if snapshot_debian_hash:
+                                            file_url = f"{SNAPSHOT_DEBIAN}/file/{snapshot_debian_hash}"
+                                            pkg.remotefiles.insert(0, file_url)
+                                        poolfiles[suite][component][arch].append(pkg)
+                    except Exception as e:
+                        logger.error(str(e))
+
+        if not provision_db_only:
+            # We separate the download part from parse part
+            for suite in suites:
+                for component in components:
+                    for arch in architectures:
+                        for file in poolfiles[suite][component][arch]:
+                            self.download_file(file)
+        return poolfiles
+
+    def provision_database(self, archive, timestamp, suites, components, architectures,
+                           poolfiles, ignore_provisioned=False):
+        session = db_create_session()
+        to_add = []
+        to_add_suites = {}
+        to_add_components = {}
+        to_add_architectures = {}
+        to_add_hashes = {}
+        to_add_files = {}
+        to_add_srcpkg = {}
+        to_add_binpkg = {}
+
+        try:
+            db_archive = session.query(DBarchive).get(archive)
+            if not db_archive:
+                db_archive = DBarchive(name=archive)
+                to_add.append(db_archive)
+
+            logger.info(f"Provision database for timestamp: {timestamp}")
+            # we convert timestamp to a SQL format
+            parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
+            db_timestamp = session.query(DBtimestamp).get(parsed_ts)
+            if not db_timestamp:
+                db_timestamp = DBtimestamp(value=parsed_ts)
+                to_add.append(db_timestamp)
+
+            for suite in suites:
+                db_suite = session.query(DBsuite).get(suite)
+                if not db_suite and not to_add_suites.get(suite, None):
+                    db_suite = DBsuite(name=suite)
+                    to_add_suites[suite] = db_suite
+                for component in components:
+                    db_component = session.query(DBcomponent).get(component)
+                    if not db_component and not to_add_components.get(component, None):
+                        db_component = DBcomponent(name=component)
+                        to_add_components[component] = db_component
+                    for arch in architectures:
+                        db_architecture = session.query(DBarchitecture).get(arch)
+                        if not db_architecture and not to_add_architectures.get(arch, None):
+                            db_architecture = DBarchitecture(name=arch)
+                            to_add_architectures[arch] = db_architecture
+
+                        repodata = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/{arch}"
+                        logger.debug(f"Processing {repodata}")
+                        # Check if we already provisioned DB with
+                        repodata_id = hashlib.sha1(repodata.encode()).hexdigest()
+                        db_repodata = session.query(DBrepodata).get(repodata_id)
+                        if not ignore_provisioned and db_repodata:
+                            session.close()
+                            continue
+
+                        for f in poolfiles[suite][component][arch]:
+                            hash_ref = f.sha256 + f.suite + f.component
+                            if not to_add_hashes.get(hash_ref, None):
+                                to_add_hashes[hash_ref] = {
+                                        "sha256": f.sha256,
+                                        "archive_name": archive,
+                                        "timestamp_value": parsed_ts,
+                                        "suite_name": suite,
+                                        "component_name": component
+                                }
+                            file_ref = f.sha256 + f.name + f.path
+                            if not to_add_files.get(file_ref, None):
+                                to_add_files[file_ref] = {
+                                        "sha256": f.sha256,
+                                        "name": f.name,
+                                        "size": f.size,
+                                        "path": f.path,
+                                }
+                            package_ref = f.sha256 + f.name + f.version + arch
+                            if arch == "source":
+                                if not to_add_srcpkg.get(package_ref, None):
+                                    db_pkg = {
+                                        "name": f.name,
+                                        "version": f.version,
+                                        "sha256": f.sha256
+                                    }
+                                    to_add_srcpkg[package_ref] = db_pkg
+                            else:
+                                if not to_add_binpkg.get(package_ref, None):
+                                    db_pkg = {
+                                        "name": f.name,
+                                        "version": f.version,
+                                        "sha256": f.sha256,
+                                        "architecture": f.architecture
+                                    }
+                                    to_add_binpkg[package_ref] = db_pkg
+
+                        if not db_repodata:
+                            to_add.append(DBrepodata(id=repodata_id))
+
+            # workaround "all" needed in non-"all" packages
+            db_architecture = session.query(DBarchitecture).get("all")
+            if not db_architecture and not to_add_architectures.get("all", None):
+                db_architecture = DBarchitecture(name="all")
+                to_add_architectures["all"] = db_architecture
+
+            to_add_suites = list(to_add_suites.values())
+            to_add_components = list(to_add_components.values())
+            to_add_architectures = list(to_add_architectures.values())
+            to_add_hashes = list(to_add_hashes.values())
+            to_add_files = list(to_add_files.values())
+            to_add_srcpkg = list(to_add_srcpkg.values())
+            to_add_binpkg = list(to_add_binpkg.values())
+
+            if to_add_suites:
+                logger.debug(f"Commit to DBsuite: {len(to_add_suites)}")
+                session.add_all(to_add_suites)
+                session.commit()
+
+            if to_add_components:
+                logger.debug(f"Commit to DBcomponent: {len(to_add_components)}")
+                session.add_all(to_add_components)
+                session.commit()
+
+            if to_add_architectures:
+                logger.debug(f"Commit to DBarchitecture: {len(to_add_architectures)}")
+                session.add_all(to_add_architectures)
+                session.commit()
+
+            if to_add:
+                logger.debug(f"Commit to DBarchive, DBtimestamp, DBsrcpkg, DBbinpkg, DBrepodata: {len(to_add)}")
+                session.add_all(to_add)
+                session.commit()
+
+            stmt = insert(ArchivesTimestamps).values(
+                [{"archive_name": archive, "timestamp_value": parsed_ts}]
+            )
+            stmt = stmt.on_conflict_do_nothing()
+            session.execute(stmt)
+            session.commit()
+
+            if to_add_hashes:
+                logger.debug(f"Commit to DBhash: {len(to_add_hashes)}")
+                stmt = insert(DBhash).values(
+                    [{"sha256": f["sha256"]} for f in to_add_hashes]
+                )
+                stmt = stmt.on_conflict_do_nothing(index_elements=[DBhash.sha256])
+                session.execute(stmt)
+                session.commit()
+
+                # This function is triggered only ON CONFLICT in files_locations
+                # table. In consequence, there exists always at least one non-empty
+                # array 'ranges' and also at least one previous timestamp with
+                # respect to current provisioned one.
+                stmt_create_replace_timestamps_ranges = f"""
+                CREATE OR REPLACE FUNCTION
+                get_timestamps_ranges (ranges text[])
+                    RETURNS text[]
+                AS $$
+                    from dateutil.parser import parse as parsedate
+
+                    # Create query for getting timestamps
+                    query = "SELECT value FROM timestamps ORDER BY value ASC"
+                    rv = plpy.execute(query)
+                    if rv is not None:
+                        all_timestamps = [t["value"] for t in rv]
+
+                    current_timestamp = '{parsed_ts}'
+                    previous_timestamp = None
+                    try:
+                        previous_timestamp = all_timestamps[all_timestamps.index(current_timestamp)-1]
+                    except ValueError:
+                        pass
+
+                    # Current timestamp range of the archive
+                    backward_range = [previous_timestamp, current_timestamp]
+
+                    # Check if a file has its latest provisioned timestamp being
+                    # the previous timestamp in the archive's timestamps. Else,
+                    # there is a gap (unfortunately, that happens) and the file
+                    # is missing in previous provisioned timestamps.
+                    # In this case, we add a singleton range.
+                    updated_ranges = ranges.copy()
+                    for i, _ in enumerate(updated_ranges):
+                        if parsedate(updated_ranges[i][0]) <= parsedate(current_timestamp) <= parsedate(updated_ranges[i][1]):
+                            break
+                        elif [updated_ranges[i][1], backward_range[1]] == backward_range:
+                            updated_ranges[i][1] = backward_range[1]
+                            if i+1 != len(updated_ranges) and updated_ranges[i][1] == updated_ranges[i+1][0]:
+                                updated_ranges[i+1][0] = updated_ranges[i][0]
+                                updated_ranges.pop(i)
+                        elif parsedate(current_timestamp) < parsedate(updated_ranges[i][0]):
+                            updated_ranges.insert(i, [current_timestamp, current_timestamp])
+                        elif parsedate(updated_ranges[i][1]) < parsedate(current_timestamp) and i+1 == len(updated_ranges):
+                            updated_ranges.insert(i+1, [current_timestamp, current_timestamp])
+                        else:
+                            continue
+                        break
+
+                    # We review the whole list and ensure that we merge into one range
+                    # two successive ranges with the same end/begin.
+                    final_ranges = [updated_ranges[0]]
+                    for i, current_range in enumerate(updated_ranges[1:]):
+                        idx = all_timestamps.index(current_range[1])
+                        previous_range = final_ranges[-1]
+
+                        backward_range_expected = all_timestamps[idx-2:idx]
+                        backward_range = [previous_range[1], current_range[0]]
+                        if backward_range != backward_range_expected:
+                            final_ranges.append(current_range)
+                        else:
+                            final_ranges[-1][1] = current_range[1]
+
+                    return final_ranges
+                $$ LANGUAGE plpython3u;
+                """
+                session.execute(stmt_create_replace_timestamps_ranges)
+                session.commit()
+
+                stmt = insert(HashesLocations).values(
+                    [
+                        {
+                            "sha256": f["sha256"],
+                            "archive_name": f["archive_name"],
+                            "suite_name": f["suite_name"],
+                            "component_name": f["component_name"],
+                            "timestamp_ranges": [[f["timestamp_value"], f["timestamp_value"]]]
+                        } for f in to_add_hashes
+                    ]
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[
+                        HashesLocations.c.sha256,
+                        HashesLocations.c.archive_name,
+                        HashesLocations.c.suite_name,
+                        HashesLocations.c.component_name
+                    ],
+                    set_=dict(
+                        timestamp_ranges=func.get_timestamps_ranges(HashesLocations.c.timestamp_ranges),
+                    )
+                )
+                session.execute(stmt)
+                session.commit()
+
+            if to_add_files:
+                logger.debug(f"Commit to DBfile: {len(to_add_files)}")
+                stmt = insert(DBfile).values(
+                    [
+                        {
+                            "sha256": f["sha256"],
+                            "size": f["size"],
+                            "name": f["name"],
+                            "path": f["path"]
+                        } for f in to_add_files
+                    ]
+                )
+                stmt = stmt.on_conflict_do_nothing()
+                session.execute(stmt)
+                session.commit()
+
+            if to_add_srcpkg:
+                logger.debug(f"Commit to DBsrcpkg: {len(to_add_srcpkg)}")
+                stmt = insert(DBsrcpkg).values(
+                    [
+                        {
+                            "name": f["name"],
+                            "version": f["version"]
+                        } for f in to_add_srcpkg
+                    ]
+                )
+                stmt = stmt.on_conflict_do_nothing()
+                session.execute(stmt)
+                session.commit()
+
+                stmt = insert(SrcpkgFiles).values(
+                    [
+                        {
+                            "srcpkg_name": f["name"],
+                            "srcpkg_version": f["version"],
+                            "sha256": f["sha256"],
+                        } for f in to_add_srcpkg
+                    ]
+                )
+                stmt = stmt.on_conflict_do_nothing()
+                session.execute(stmt)
+                session.commit()
+
+            if to_add_binpkg:
+                logger.debug(f"Commit to DBbinpkg: {len(to_add_binpkg)}")
+                stmt = insert(DBbinpkg).values(
+                    [
+                        {
+                            "name": f["name"],
+                            "version": f["version"]
+                        } for f in to_add_binpkg
+                    ]
+                )
+                stmt = stmt.on_conflict_do_nothing()
+                session.execute(stmt)
+                session.commit()
+
+                stmt = insert(BinpkgFiles).values(
+                    [
+                        {
+                            "binpkg_name": f["name"],
+                            "binpkg_version": f["version"],
+                            "sha256": f["sha256"],
+                            "architecture": f["architecture"],
+                        } for f in to_add_binpkg
+                    ]
+                )
+                stmt = stmt.on_conflict_do_nothing()
+                session.execute(stmt)
+                session.commit()
+
+        finally:
+            session.close()
 
     def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False, download_installer_files=True):
         """
@@ -655,43 +813,24 @@ class SnapshotCli:
         """
         os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
         archives = set(self.archives).intersection(DEBIAN_ARCHIVES)
+        import time
         for archive in archives:
             timestamps = self.get_timestamps(archive)
-            if not provision_db_only:
-                for timestamp in timestamps:
+            # we provision from past to now for timestamp_ranges array
+            for timestamp in reversed(timestamps):
+                if not provision_db_only:
                     # Download repository metadata and translation
-                    files = {}
-                    for suite in self.suites:
-                        for component in self.components:
-                            self.download_translation(archive, timestamp, suite, component)
-                            self.download_dep11(archive, timestamp, suite, component, self.architectures)
-                            for arch in self.architectures:
-                                try:
-                                    self.download_repodata(archive, timestamp, suite, component, arch)
-                                    if download_installer_files:
-                                        self.download_installer(archive, timestamp, suite, component, arch)
-                                except SnapshotRepodataNotFoundException:
-                                    continue
-                                files.update(self.get_files(archive, timestamp, suite, component, arch))
+                    distfiles = self.download_distfiles(archive, timestamp, self.suites, self.components, self.architectures)
 
-                    # Download repository files
-                    for file in sorted(files.values(), key=lambda x: x.name):
-                        self.download_file(file, check_only=check_only, no_clean=no_clean)
+                # Download repository packages
+                poolfiles = self.download_poolfiles(archive, timestamp, self.suites, self.components, self.architectures, provision_db_only=provision_db_only)
 
-                    # We download Release files at the end to ack
-                    # the mirror sync. It is for helping rebuilders
-                    # checking available mirrors.
-                    for suite in self.suites:
-                        for component in self.components:
-                            for arch in self.architectures:
-                                try:
-                                    self.download_release(archive, timestamp, suite, component, arch)
-                                except SnapshotRepodataNotFoundException:
-                                    continue
-            if provision_db:
-                # we provision from past to now for timestamp_ranges array
-                for timestamp in reversed(timestamps):
-                    self.provision_database(archive, timestamp, self.suites, self.components, self.architectures, ignore_provisioned=ignore_provisioned)
+                t0 = time.time()
+                if not provision_db:
+                    continue
+                self.provision_database(archive, timestamp, self.suites, self.components, self.architectures,
+                                        poolfiles=poolfiles, ignore_provisioned=ignore_provisioned)
+                logger.debug(f"DB provisioned in: {int(time.time()-t0)} seconds")
 
     def run_qubes(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False):
         """
@@ -705,32 +844,16 @@ class SnapshotCli:
         architectures = ["amd64", "source"]
 
         for archive in archives:
-            for timestamp in timestamps:
-                if not provision_db_only:
-                    files = {}
-                    for suite in suites:
-                        for component in components:
-                            for arch in architectures:
-                                self.download_repodata(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
-                                files.update(self.get_files(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES))
-                                self.download_release(archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_QUBES, force=True)
+            if not provision_db_only:
+                # Download repository metadata and translation
+                distfiles = self.download_distfiles(archive, timestamps[0], suites, components, architectures, baseurl=SNAPSHOT_QUBES, force=True)
 
-                    # Download repository files
-                    for file in sorted(files.values(), key=lambda x: x.name):
-                        self.download_file(file, check_only=check_only, no_clean=no_clean)
-            # Provision database
+            # Download repository packages
+            poolfiles = self.download_poolfiles(archive, timestamps[0], suites, components, architectures, baseurl=SNAPSHOT_QUBES)
+
             if provision_db:
-                self.provision_database(archive, timestamps[0], suites, components, architectures, ignore_provisioned=True)
-
-    def init_snapshot_db_hash(self):
-        if os.path.exists("/home/user/db/map_srcpkg_hash.csv") and os.path.exists("/home/user/db/map_binpkg_hash.csv"):
-            import csv
-            with open('/home/user/db/map_srcpkg_hash.csv', newline='') as fd:
-                for row in csv.reader(fd, delimiter=',', quotechar='|'):
-                    self.map_srcpkg_hash[row[0]] = row[1]
-            with open('/home/user/db/map_binpkg_hash.csv', newline='') as fd:
-                for row in csv.reader(fd, delimiter=',', quotechar='|'):
-                    self.map_binpkg_hash[row[0]] = row[1]
+                self.provision_database(archive, timestamps[0], suites, components, architectures,
+                                        poolfiles=poolfiles, ignore_provisioned=True)
 
 
 def get_args():
