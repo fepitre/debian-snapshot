@@ -607,14 +607,22 @@ class SnapshotCli:
                 for f in files:
                     # files has the same hash, it is downloading once then creates symlinks
                     localfile = f"{self.localdir}/{base_url}/installer-{arch}/current/images/{f}"
-                    remotefile = f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/{f}"
-                    logger.debug(remotefile)
-                    if not url_exists(remotefile):
-                        logger.error(f"Cannot find {remotefile}")
-                        continue
-                    if os.path.exists(localfile):
-                        continue
-                    self.download(localfile, remotefile, sha256=sha256, compute_size=True)
+                    urls = [
+                        f"https://ftp.debian.org/{archive}/dists/{suite}/{component}/installer-{arch}/current/images/{f}",
+                        f"{SNAPSHOT_DEBIAN}/{base_url}/installer-{arch}/current/images/{f}"
+                    ]
+                    for url in urls:
+                        try:
+                            logger.debug(url)
+                            if not url_exists(url):
+                                logger.error(f"Cannot find {url}")
+                                continue
+                            if os.path.exists(localfile):
+                                continue
+                            self.download(localfile, url, sha256=sha256, compute_size=True)
+                            break
+                        except Exception as e:
+                            logger.debug(f"Retry with another URL ({str(e)})")
 
     def download_file(self, file, check_only, no_clean):
         logger.info(file)
