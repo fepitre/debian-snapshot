@@ -149,7 +149,7 @@ def download_with_retry_and_resume(url, path, timeout=30, sha256=None, no_clean=
         if sha256 and tmp_sha256 != sha256:
             if not no_clean:
                 os.remove(tmp_path)
-            raise Exception(f"{fname}: wrong SHA256: {tmp_sha256} != {sha256}")
+            raise Exception(f"{fname}: wrong SHA256: {tmp_sha256} (expected: {sha256})")
         os.rename(tmp_path, path)
     elif file_size == -1:
         raise Exception(f"{f}: failed to get 'Content-Length': {url}")
