@@ -614,10 +614,10 @@ class SnapshotCli:
                     for url in urls:
                         try:
                             logger.debug(url)
+                            if os.path.exists(localfile):
+                                break
                             if not url_exists(url):
                                 logger.error(f"Cannot find {url}")
-                                continue
-                            if os.path.exists(localfile):
                                 continue
                             self.download(localfile, url, sha256=sha256, compute_size=True)
                             break
