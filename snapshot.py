@@ -283,9 +283,6 @@ class SnapshotCli:
                 session.add_all(to_add_files)
                 session.commit()
 
-                session.add_all(to_add_files)
-                session.commit()
-
                 stmt_insert_new_file = """
                 INSERT INTO files (sha256, size, name, path)
                 SELECT t.sha256, t.size, t.name, t.path FROM tempfiles t
