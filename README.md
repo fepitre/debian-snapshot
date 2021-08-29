@@ -9,7 +9,7 @@ It currently uses `snapshot.debian.org` set of timestamps and data for provision
 > We currently stick to `snapshot.debian.org` set of timestamps only for current development and testing and notably,
 > for `metasnap.debian.net` portability.
 
-## Client
+## Snapshot repositories
 
 ```
 usage: snapshot.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH] [--timestamp TIMESTAMP]
@@ -403,3 +403,81 @@ We include the support for the [multi-versions](https://deb.qubes-os.org/all-ver
 On this repository, we can find the QubesOS packages for `bullseye` and `buster`. As there is not strictly speaking `snapshots`
 but a repository having multiple versions for packages, we reference the unique timestamp as `99990101T000000Z`.
 Archives are named as `qubes-rX.Y-vm` where `rX.Y` references the Qubes release and `vm` is the Qubes `package-set`.
+
+
+## Installation
+
+In this section, we give a quick installation guide.
+
+For the Snapshot repositories, install the following dependencies:
+```bash
+$ sudo apt install postgresql-13 postgresql-plpython3-13 python3-debian python3-sqlalchemy python3-httpx python3-tenacity
+```
+
+Additional, for the Snapshot API install:
+```bash
+$ sudo apt install python3-sqlalchemy python3-psycopg2 python3-flask python3-flask-caching python3-flask-sqlalchemy python3-dateutil uwsgi uwsgi-plugin-python3 nginx-full
+```
+
+In what follows, we assume to have a user `user`. As `user`, go to `/home/user` folder and clone the repository:
+```bash
+$ git clone https://github.com/fepitre/debian-snapshot
+```
+
+Install the `snapshot-api.service`:
+```bash
+$ sudo cp /home/user/debian-snapshot/api/snapshot-api.service /usr/lib/systemd/system
+```
+
+> Note: Ensure that `WorkingDirectory` in `snapshot-api.service` points at `api` folder into the path of the cloned `git`
+directory, here `/home/user/rebuilder/api`. Pay attention that in `/home/user/rebuilder/api/snapshot-api.ini`, the
+> configuration file for uWSGI, the application is run with `uid = user` and  `gid = www-data`. If case where you have
+> a different user than `user`, adjust the `uid` value.
+
+Then:
+```bash
+$ sudo systemctl daemon-reload
+```
+
+Create necessary folders:
+```bash
+$ sudo mkdir -p /snapshot /var/run/snapshot /var/log/snapshot
+```
+
+and adjust permissions:
+```bash
+$ sudo chown user:www-data /var/run/snapshot
+$ sudo chown postgres:postgres /var/lib/postgresql
+$ sudo chown user:user /var/log/snapshot
+```
+
+Copy `nginx` sample configuration:
+```bash
+$ sudo cp /home/user/debian-snapshot/api/nginx.conf /etc/nginx/
+```
+
+> WARNING: This configuration serves only as an example. It has to be adapted and hardened in function of your setup.
+
+Init `postgresql` snapshot database:
+```bash
+$ sudo -u postgres psql < /home/user/debian-snapshot/init_db.psql
+```
+
+Enables services:
+```bash
+$ sudo systemctl enable postgresql@13-main
+$ sudo systemctl enable snapshot-api
+$ sudo systemctl enable nginx
+```
+
+In `user`'s crontab (`crontab -e`), add the following cron job:
+```bash
+0 */3 * * * /home/user/debian-snapshot/scripts/snapshot-mirror-cron.sh
+```
+
+You can now start the services:
+```bash
+$ sudo systemctl start postgresql@13-main
+$ sudo systemctl start snapshot-api
+$ sudo systemctl start nginx
+```

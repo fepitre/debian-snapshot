@@ -1,6 +1,7 @@
 [Unit]
 Description=snapshot uWSGI instance
-After=network.target
+After=network.target postgresql@13-main.service
+Before=nginx.service
 
 [Service]
 User=user

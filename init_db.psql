@@ -1,0 +1,7 @@
+CREATE DATABASE snapshot;
+CREATE USER snapshot WITH ENCRYPTED PASSWORD 'snapshot';
+GRANT ALL PRIVILEGES ON DATABASE snapshot TO snapshot;
+
+\c snapshot;
+CREATE LANGUAGE plpython3u;
+UPDATE pg_language SET lanpltrusted = true WHERE lanname = 'plpython3u';
