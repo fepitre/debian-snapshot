@@ -7,7 +7,10 @@ Before=nginx.service
 User=user
 Group=www-data
 WorkingDirectory=/home/user/debian-snapshot/api
+ExecStartPre=+/usr/bin/mkdir -p /var/run/snapshot
+ExecStartPre=+/usr/bin/chown user:www-data /var/run/snapshot
 ExecStart=/usr/bin/uwsgi --ini snapshot-api.ini
+
 
 [Install]
 WantedBy=multi-user.target
