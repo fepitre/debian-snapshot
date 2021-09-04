@@ -237,7 +237,7 @@ class SnapshotCli:
                 f"Release.gpg",
                 f"InRelease"
             ]
-            hashes_suite_path = self.get_hashes_from_page(f"{baseurl}/{suite_path}")
+            release_hashes = {}
             for f in release_files:
                 release_file = File(
                     archive=archive,
@@ -245,8 +245,19 @@ class SnapshotCli:
                     path=f"dists/{suite}/{f}",
                     localfile=f"{self.localdir}/{suite_path}/{f}",
                     remotefiles=[f"{baseurl}/{suite_path}/{f}"],
-                    sha256=hashes_suite_path.get(f, None)
+                    sha256=release_hashes.get(f, None)
                 )
+                # Parse Release file to get hashes of several repository files
+                if f == "Release":
+                    if not url_exists(release_file.remotefiles[0]):
+                        logger.error(f"Cannot find {release_file.remotefiles[0]}")
+                        continue
+                    release_file_hash = self.download(release_file.localfile, release_file.remotefiles[0])
+                    release_file.sha256 = release_file_hash
+                    with open(release_file.localfile) as fd:
+                        parsed_rel = debian.deb822.Release(fd)
+                    rel = [(f"dists/{suite}/{l['name']}", l['sha256']) for l in parsed_rel['SHA256']]
+                    release_hashes = dict((x, y) for x, y in rel)
                 distfiles[suite]["all"][release_file.to_str()] = release_file
 
             for component in components:
@@ -262,13 +273,14 @@ class SnapshotCli:
                         release_arch_path = f"binary-{arch}"
                     release_files.append(f"{component}/{release_arch_path}/Release")
                 for f in release_files:
+                    file_path = f"dists/{suite}/{f}"
                     release_file = File(
                         archive=archive,
                         timestamp=timestamp,
-                        path=f"dists/{suite}/{f}",
+                        path=file_path,
                         localfile=f"{self.localdir}/{suite_path}/{f}",
                         remotefiles=[f"{baseurl}/{suite_path}/{f}"],
-                        sha256=hashes_suite_path.get(f, None),
+                        sha256=release_hashes.get(file_path, None),
                     )
                     files[release_file.to_str()] = release_file
 
@@ -281,31 +293,34 @@ class SnapshotCli:
                         basepath = f"dists/{suite}/{component}/binary-{arch}"
                         repodata = "Packages.gz"
                     dist = f"archive/{archive}/{timestamp}/{basepath}"
-                    hashes = self.get_hashes_from_page(f"{baseurl}/{dist}")
+                    # hashes = self.get_hashes_from_page(f"{baseurl}/{dist}")
+                    file_path = f"{basepath}/{repodata}"
                     repodata_file = File(
                         archive=archive,
                         timestamp=timestamp,
-                        path=f"/{basepath}/{repodata}",
+                        path=file_path,
                         localfile=f"{self.localdir}/{dist}/{repodata}",
                         remotefiles=[f"{baseurl}/{dist}/{repodata}"],
-                        sha256=hashes.get(repodata, None),
+                        sha256=release_hashes.get(file_path, None),
                     )
                     files[repodata_file.to_str()] = repodata_file
 
                 # Translations
                 i18n = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n"
                 translation_files = [
-                    "Translation-en.bz2"
+                    "Translation-en.bz2",
+                    "Translation-en.xz"
                 ]
-                hashes = self.get_hashes_from_page(f"{baseurl}/{i18n}")
+                # hashes = self.get_hashes_from_page(f"{baseurl}/{i18n}")
                 for f in translation_files:
+                    file_path = f"dists/{suite}/{component}/i18n/{f}"
                     translation_file = File(
                         archive=archive,
                         timestamp=timestamp,
-                        path=f"dists/{suite}/{component}/i18n/{f}",
+                        path=file_path,
                         localfile=f"{self.localdir}/{i18n}/{f}",
                         remotefiles=[f"{baseurl}/{i18n}/{f}"],
-                        sha256=hashes.get(f, None),
+                        sha256=release_hashes.get(file_path, None),
                     )
                     files[translation_file.to_str()] = translation_file
 
@@ -325,15 +340,16 @@ class SnapshotCli:
                             f"CID-Index-{arch}.json.gz",
                             f"Components-{arch}.yml.gz"
                         ]
-                hashes = self.get_hashes_from_page(f"{baseurl}/{dep11}")
+                # hashes = self.get_hashes_from_page(f"{baseurl}/{dep11}")
                 for f in dep11_files:
+                    file_path = f"dists/{suite}/{component}/dep11/{f}"
                     dep11_file = File(
                         archive=archive,
                         timestamp=timestamp,
-                        path=f"dists/{suite}/{component}/dep11/{f}",
+                        path=file_path,
                         localfile=f"{self.localdir}/{dep11}/{f}",
                         remotefiles=[f"{baseurl}/{dep11}/{f}"],
-                        sha256=hashes.get(f, None),
+                        sha256=release_hashes.get(file_path, None),
                     )
                     files[dep11_file.to_str()] = dep11_file
 
@@ -397,7 +413,7 @@ class SnapshotCli:
                 if not provision_db_only:
                     # Download repository files
                     for file in files.values():
-                        logger.debug(file.remotefiles[0])
+                        logger.debug(f"{timestamp}:{file.remotefiles[0]}")
                         if os.path.exists(file.localfile) and force:
                             os.remove(file.localfile)
                         # e.g. a suite may not exist depending of the timestamps
