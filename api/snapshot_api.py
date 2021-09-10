@@ -306,8 +306,11 @@ def upload_buildinfo():
     status_code = 200
     try:
         assert request.content_type.startswith("multipart/form-data;")
-        assert request.form.get("buildinfo")
-        buildinfo_file = request.form['buildinfo']
+        assert request.form.get("buildinfo") or request.files.get("buildinfo")
+        if request.form.get("buildinfo"):
+            buildinfo_file = request.form['buildinfo']
+        else:
+            buildinfo_file = request.files['buildinfo']
         parsed_info = debian.deb822.BuildInfo(buildinfo_file)
 
         ranges = {}
