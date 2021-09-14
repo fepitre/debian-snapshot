@@ -353,62 +353,62 @@ class SnapshotCli:
                     )
                     files[dep11_file.to_str()] = dep11_file
 
-                # installer related content
-                for arch in architectures:
-                    if arch != "source" and download_installer_files:
-                        debian_installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}"
-                        hashes = self.get_hashes_from_page(f"{baseurl}/{debian_installer}")
-                        for f in ["Packages.gz", "Release"]:
-                            installer_file = File(
-                                archive=archive,
-                                timestamp=timestamp,
-                                path=f"{self.localdir}/{debian_installer}/{f}",
-                                localfile=f"{self.localdir}/{debian_installer}/{f}",
-                                remotefiles=[f"{baseurl}/{debian_installer}/{f}"],
-                                sha256=hashes.get(f, None)
-                            )
-                            files[installer_file.to_str()] = installer_file
+                ## installer related content
+                #for arch in architectures:
+                #    if arch != "source" and download_installer_files:
+                #        debian_installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}"
+                #        hashes = self.get_hashes_from_page(f"{baseurl}/{debian_installer}")
+                #        for f in ["Packages.gz", "Release"]:
+                #            installer_file = File(
+                #                archive=archive,
+                #                timestamp=timestamp,
+                #                path=f"{self.localdir}/{debian_installer}/{f}",
+                #                localfile=f"{self.localdir}/{debian_installer}/{f}",
+                #                remotefiles=[f"{baseurl}/{debian_installer}/{f}"],
+                #                sha256=hashes.get(f, None)
+                #            )
+                #            files[installer_file.to_str()] = installer_file
 
-                    if arch not in ("source", "all"):
-                        parsed_files = {}
-                        installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/installer-{arch}"
-                        installer_localfile_sha256sums = f"{self.localdir}/{installer}/current/images/SHA256SUMS"
-                        installer_remote_sha256sums = f"{SNAPSHOT_DEBIAN}/{installer}/current/images/SHA256SUMS"
-                        if not os.path.exists(installer_localfile_sha256sums):
-                            if not url_exists(installer_remote_sha256sums):
-                                logger.error(f"Cannot find {installer_remote_sha256sums}")
-                                continue
-                            # We download it before
-                            shasums_sha256 = self.download(installer_localfile_sha256sums, installer_remote_sha256sums)
-                            shasums_file = File(
-                                archive=archive,
-                                timestamp=timestamp,
-                                path=f"dists/{suite}/{component}/installer-{arch}/current/images/SHA256SUMS",
-                                localfile=installer_localfile_sha256sums,
-                                remotefiles=[installer_remote_sha256sums],
-                                sha256=shasums_sha256,
-                                size=os.path.getsize(installer_localfile_sha256sums)
-                            )
-                            files[shasums_file.to_str()] = shasums_file
-                        with open(installer_localfile_sha256sums, 'r') as fd:
-                            for f in fd.readlines():
-                                key, val = f.split()
-                                parsed_files.setdefault(key, []).append(val[2:])
-                        for sha256, installer_files in parsed_files.items():
-                            for f in installer_files:
-                                installer_file = File(
-                                    archive=archive,
-                                    timestamp=timestamp,
-                                    path=f"dists/{suite}/{component}/installer-{arch}/current/images/{f}",
-                                    localfile=f"{self.localdir}/{installer}/current/images/{f}",
-                                    remotefiles=[
-                                        f"{FTP_DEBIAN}/{archive}/dists/{suite}/{component}/installer-{arch}/current/images/{f}",
-                                        f"{baseurl}/{installer}/current/images/{f}"
-                                    ],
-                                    sha256=sha256,
-                                    size=-1
-                                )
-                                files[installer_file.to_str()] = installer_file
+                #    if arch not in ("source", "all"):
+                #        parsed_files = {}
+                #        installer = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/installer-{arch}"
+                #        installer_localfile_sha256sums = f"{self.localdir}/{installer}/current/images/SHA256SUMS"
+                #        installer_remote_sha256sums = f"{SNAPSHOT_DEBIAN}/{installer}/current/images/SHA256SUMS"
+                #        if not os.path.exists(installer_localfile_sha256sums):
+                #            if not url_exists(installer_remote_sha256sums):
+                #                logger.error(f"Cannot find {installer_remote_sha256sums}")
+                #                continue
+                #            # We download it before
+                #            shasums_sha256 = self.download(installer_localfile_sha256sums, installer_remote_sha256sums)
+                #            shasums_file = File(
+                #                archive=archive,
+                #                timestamp=timestamp,
+                #                path=f"dists/{suite}/{component}/installer-{arch}/current/images/SHA256SUMS",
+                #                localfile=installer_localfile_sha256sums,
+                #                remotefiles=[installer_remote_sha256sums],
+                #                sha256=shasums_sha256,
+                #                size=os.path.getsize(installer_localfile_sha256sums)
+                #            )
+                #            files[shasums_file.to_str()] = shasums_file
+                #        with open(installer_localfile_sha256sums, 'r') as fd:
+                #            for f in fd.readlines():
+                #                key, val = f.split()
+                #                parsed_files.setdefault(key, []).append(val[2:])
+                #        for sha256, installer_files in parsed_files.items():
+                #            for f in installer_files:
+                #                installer_file = File(
+                #                    archive=archive,
+                #                    timestamp=timestamp,
+                #                    path=f"dists/{suite}/{component}/installer-{arch}/current/images/{f}",
+                #                    localfile=f"{self.localdir}/{installer}/current/images/{f}",
+                #                    remotefiles=[
+                #                        f"{FTP_DEBIAN}/{archive}/dists/{suite}/{component}/installer-{arch}/current/images/{f}",
+                #                        f"{baseurl}/{installer}/current/images/{f}"
+                #                    ],
+                #                    sha256=sha256,
+                #                    size=-1
+                #                )
+                #                files[installer_file.to_str()] = installer_file
 
                 if not provision_db_only:
                     # Download repository files
