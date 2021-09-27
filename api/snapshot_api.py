@@ -22,7 +22,7 @@ import logging
 import debian.deb822
 
 from operator import itemgetter
-from flask import request, Flask, Response
+from flask import request, Flask, Response, redirect
 from flask_caching import Cache
 from flask_sqlalchemy import SQLAlchemy
 from dateutil.parser import parse as parsedate
@@ -76,6 +76,11 @@ def file_desc(file):
         }
         locations.append(location)
     return locations
+
+
+def get_path(location):
+    return f"/archive/{location['archive_name']}/{location['timestamp_ranges'][0][0]}" \
+           f"/{location['path'][1:]}/{location['name']}"
 
 
 @app.route("/mr/timestamp/<string:archive_name>", methods=["GET"])
@@ -160,6 +165,26 @@ def file_info(file_hash):
         api_result.update({
             "result": file_desc(file),
         })
+    except SnapshotEmptyQueryException:
+        status_code = 404
+    except Exception as e:
+        logger.error(str(e))
+        status_code = 500
+    api_result = json.dumps(api_result, indent=2) + "\n"
+    return Response(api_result, status=status_code, mimetype="application/json")
+
+
+@app.route("/mr/file/<string:file_hash>/download", methods=["GET"])
+def file_download(file_hash):
+    api_result = {"_api": API_VERSION, "_comment": "notset"}
+    try:
+        # we have only one file because we use sha256 as hash
+        # compared to snapshot.d.o
+        file = db.session.query(DBfile).get(file_hash)
+        if not file:
+            raise SnapshotEmptyQueryException
+        info = file_desc(file)
+        return redirect(get_path(info[0]))
     except SnapshotEmptyQueryException:
         status_code = 404
     except Exception as e:
