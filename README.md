@@ -63,7 +63,7 @@ and `20210315T085036Z` timestamp to local directory `/snapshot`:
 
 ### Available timestamps
 
-A partial timestamps set (see Example 1) is available at `http(s)://debian.notset.fr/snapshot`. The only thresholds are (extracted `Nginx` conf):
+A partial timestamps set (see Example 1) is available at `http(s)://snapshot.notset.fr`. The only thresholds are (extracted `Nginx` conf):
 
 ```
 limit_conn conn_limit_per_ip 20;
@@ -113,6 +113,10 @@ URL: /mr/file/<sha256>/info
 http status codes: 200 404 500
 Summary: information about file
 
+URL: /mr/file/<sha256>/download
+http status codes: 302 404 500
+Summary: Download file from hash
+
 URL: /mr/timestamp/<archive_name>
 http status codes: 200 404 500
 Summary: list all available timestamps for this archive name
@@ -135,7 +139,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 #### Get `debian` archive available timestamps:
 
-* Example 1: Query all available timestamps for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian)
+* Example 1: Query all available timestamps for `debian` (http://snapshot.notset.fr/mr/timestamp/debian)
 ```json
 {
   "_api": "0.3",
@@ -156,7 +160,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 
 ```
 
-* Example 2: Query latest timestamp available for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian/latest)
+* Example 2: Query latest timestamp available for `debian` (http://snapshot.notset.fr/mr/timestamp/debian/latest)
 ```json
 {
   "_api": "0.3",
@@ -165,7 +169,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 }
 ```
 
-* Example 3: Query closest timestamp available for `debian` (http://debian.notset.fr/snapshot/mr/timestamp/debian/20200101T000000Z)
+* Example 3: Query closest timestamp available for `debian` (http://snapshot.notset.fr/mr/timestamp/debian/20200101T000000Z)
 ```json
 {
   "_api": "0.3",
@@ -174,7 +178,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 }
 ```
 
-#### Get source files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1):
+#### Get source files info for `python-designateclient` package version `2.3.0-2` (http://snapshot.notset.fr/mr/package/python-designateclient/2.3.0-2/srcfiles?fileinfo=1):
 ```json
 {
   "_api": "0.3",
@@ -278,7 +282,7 @@ Summary: compute minimal set of timestamps containing all package versions in up
 }
 ```
 
-#### Get binary files info for `python-designateclient` package version `2.3.0-2` (http://debian.notset.fr/snapshot/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
+#### Get binary files info for `python-designateclient` package version `2.3.0-2` (http://snapshot.notset.fr/mr/binary/python-designateclient/2.3.0-2/binfiles?fileinfo=1):
 ```json
 {
   "_api": "0.3",
@@ -330,7 +334,7 @@ for the archive between `begin_timestamp` and `end_timestamp`.
 
 #### Compute a minimal set of timestamps containing all package versions referenced in a buildinfo file
 
-* Example 1 (`curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo < bash_5.1-2_amd64.buildinfo`):
+* Example 1 (`curl -F 'buildinfo=<-' http://snapshot.notset.fr/mr/buildinfo < bash_5.1-2_amd64.buildinfo`):
 ```json
 {
   "_api": "0.3",
@@ -375,7 +379,7 @@ For every known locations in terms of `archive_name`, `suite_name`, `component_n
 the set of timestamps containing all package versions referenced in the provided buildinfo file. For rebuilder softwares,
 you would use only one location which can contain more or less timestamps to be added to cover all the packages dependencies.
 
-* Example 2 (`curl -F 'buildinfo=<-' http://debian.notset.fr/snapshot/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo`):
+* Example 2 (`curl -F 'buildinfo=<-' http://snapshot.notset.fr/mr/buildinfo?suite_name=buster < bash_5.1-2_amd64.buildinfo`):
 ```json
 {
   "_api": "0.3",

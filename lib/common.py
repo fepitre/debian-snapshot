@@ -4,6 +4,7 @@ import datetime
 
 TS_FORMAT = "%Y%m%dT%H%M%SZ"
 
+
 def sha256sum(fname):
     sha256 = hashlib.sha256()
     with open(fname, "rb") as f:
