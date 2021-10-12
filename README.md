@@ -1,7 +1,7 @@
 Snapshot
 ===
 
-Create a Debian snapshot service like [snapshot.debian.org](snapshot.debian.org).
+Create a Debian snapshot service like [snapshot.debian.org](https://snapshot.debian.org).
 
 It currently uses `snapshot.debian.org` set of timestamps and data for provisioning the service. 
 
