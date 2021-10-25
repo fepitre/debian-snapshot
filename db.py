@@ -54,7 +54,6 @@ HashesLocations = Table(
     Column('archive_name', String, ForeignKey('archives.name'), primary_key=True),
     Column('suite_name', String, ForeignKey('suites.name'), primary_key=True),
     Column('component_name', String, ForeignKey('components.name'), primary_key=True),
-    Column('component_name', String, ForeignKey('components.name'), primary_key=True),
     Column('timestamp_ranges', ARRAY(String), nullable=False)
     # timestamp_ranges is an array of ranges. A range is defined as an array
     # of two representing begin/end interval among of all available timestamps
@@ -163,7 +162,7 @@ class DBfile(Base):
     size = Column(BigInteger, nullable=False)
     name = Column(String, nullable=False)
     path = Column(String, nullable=False)
-    __table_args__ = (UniqueConstraint('sha256', 'name', 'size'),)
+    __table_args__ = (UniqueConstraint('sha256', 'name', 'size', 'path'),)
 
     def __repr__(self):
         return f"<File {self.sha256}>"
@@ -189,3 +188,33 @@ class DBbinpkg(Base):
 
     def __repr__(self):
         return f"<Binary {self.name}-{self.version}>"
+
+
+# Temporary tables for DB provisioning
+
+
+class DBtemphash(Base):
+    __tablename__ = 'temphashes'
+    __table_args__ = (
+        UniqueConstraint('sha256', 'archive_name', 'suite_name', 'component_name', 'timestamp_value'),
+        {'prefixes': ['UNLOGGED']}
+    )
+    id = Column(Integer, primary_key=True)
+    sha256 = Column(String(64), nullable=False)
+    archive_name = Column(String, nullable=False)
+    suite_name = Column(String, nullable=False)
+    component_name = Column(String, nullable=False)
+    timestamp_value = Column(String, nullable=False)
+
+
+class DBtempfile(Base):
+    __tablename__ = 'tempfiles'
+    __table_args__ = (
+        UniqueConstraint('sha256', 'name', 'size', 'path'), {'prefixes': ['UNLOGGED']}
+    )
+
+    id = Column(Integer, primary_key=True)
+    sha256 = Column(String(64), nullable=True)
+    size = Column(BigInteger, nullable=False)
+    name = Column(String, nullable=False)
+    path = Column(String, nullable=False)

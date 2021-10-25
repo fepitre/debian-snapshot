@@ -19,7 +19,7 @@
 
 import argparse
 import re
-
+import time
 import debian.deb822
 import hashlib
 import logging
@@ -41,7 +41,7 @@ from sqlalchemy import func
 
 from db import DBarchive, DBtimestamp, DBrepodata, DBcomponent, DBsuite, DBarchitecture, \
     DBfile, DBsrcpkg, DBbinpkg, DBhash, HashesLocations, ArchivesTimestamps, SrcpkgFiles, BinpkgFiles, \
-    db_create_session
+    db_create_session, DBtemphash, DBtempfile
 #
 # Debian
 #
@@ -525,13 +525,15 @@ class SnapshotCli:
         to_add_srcpkg = {}
         to_add_binpkg = {}
 
+        t0 = time.time()
+
         try:
             db_archive = session.query(DBarchive).get(archive)
             if not db_archive:
                 db_archive = DBarchive(name=archive)
                 to_add.append(db_archive)
 
-            logger.info(f"Provision database for timestamp: {timestamp}")
+            logger.info(f"Provision database for timestamp: {timestamp} (t0={t0})")
             # we convert timestamp to a SQL format
             parsed_ts = parsedate(timestamp).strftime("%Y-%m-%dT%H:%M:%SZ")
             db_timestamp = session.query(DBtimestamp).get(parsed_ts)
@@ -619,22 +621,22 @@ class SnapshotCli:
             to_add_binpkg = list(to_add_binpkg.values())
 
             if to_add_suites:
-                logger.debug(f"Commit to DBsuite: {len(to_add_suites)}")
+                logger.debug(f"Commit to 'suites': {len(to_add_suites)} (t-t0 = {int(time.time() - t0)} secondes)")
                 session.add_all(to_add_suites)
                 session.commit()
 
             if to_add_components:
-                logger.debug(f"Commit to DBcomponent: {len(to_add_components)}")
+                logger.debug(f"Commit to 'components': {len(to_add_components)} (t-t0 = {int(time.time() - t0)} secondes)")
                 session.add_all(to_add_components)
                 session.commit()
 
             if to_add_architectures:
-                logger.debug(f"Commit to DBarchitecture: {len(to_add_architectures)}")
+                logger.debug(f"Commit to 'architectures': {len(to_add_architectures)} (t-t0 = {int(time.time() - t0)} secondes)")
                 session.add_all(to_add_architectures)
                 session.commit()
 
             if to_add:
-                logger.debug(f"Commit to DBarchive, DBtimestamp, DBsrcpkg, DBbinpkg, DBrepodata: {len(to_add)}")
+                logger.debug(f"Commit to 'archives', 'timestamps', 'srcpkg', 'binpkg', 'repodata': {len(to_add)} (t-t0 = {int(time.time() - t0)} secondes)")
                 session.add_all(to_add)
                 session.commit()
 
@@ -646,14 +648,6 @@ class SnapshotCli:
             session.commit()
 
             if to_add_hashes:
-                logger.debug(f"Commit to DBhash: {len(to_add_hashes)}")
-                stmt = insert(DBhash).values(
-                    [{"sha256": f["sha256"]} for f in to_add_hashes]
-                )
-                stmt = stmt.on_conflict_do_nothing(index_elements=[DBhash.sha256])
-                session.execute(stmt)
-                session.commit()
-
                 # This function is triggered only ON CONFLICT in files_locations
                 # table. In consequence, there exists always at least one non-empty
                 # array 'ranges' and also at least one previous timestamp with
@@ -723,34 +717,91 @@ class SnapshotCli:
                 session.execute(stmt_create_replace_timestamps_ranges)
                 session.commit()
 
-                stmt = insert(HashesLocations).values(
+                # logger.debug(f"Commit to DBhash: {len(to_add_hashes)}")
+                # stmt = insert(DBhash).values(
+                #     [{"sha256": f["sha256"]} for f in to_add_hashes]
+                # )
+                # stmt = stmt.on_conflict_do_nothing(index_elements=[DBhash.sha256])
+                # session.execute(stmt)
+                # session.commit()
+
+                # stmt = insert(HashesLocations).values(
+                #     [
+                #         {
+                #             "sha256": f["sha256"],
+                #             "archive_name": f["archive_name"],
+                #             "suite_name": f["suite_name"],
+                #             "component_name": f["component_name"],
+                #             "timestamp_ranges": [[f["timestamp_value"], f["timestamp_value"]]]
+                #         } for f in to_add_hashes
+                #     ]
+                # )
+                # stmt = stmt.on_conflict_do_update(
+                #     index_elements=[
+                #         HashesLocations.c.sha256,
+                #         HashesLocations.c.archive_name,
+                #         HashesLocations.c.suite_name,
+                #         HashesLocations.c.component_name
+                #     ],
+                #     set_=dict(
+                #         timestamp_ranges=func.get_timestamps_ranges(HashesLocations.c.timestamp_ranges),
+                #     )
+                # )
+                # session.execute(stmt)
+                # session.commit()
+
+                logger.debug(f"Commit to 'temphashes': {len(to_add_hashes)} (t-t0 = {int(time.time() - t0)} secondes)")
+                session.add_all(
                     [
-                        {
-                            "sha256": f["sha256"],
-                            "archive_name": f["archive_name"],
-                            "suite_name": f["suite_name"],
-                            "component_name": f["component_name"],
-                            "timestamp_ranges": [[f["timestamp_value"], f["timestamp_value"]]]
-                        } for f in to_add_hashes
+                        DBtemphash(
+                            sha256=f["sha256"],
+                            archive_name=f["archive_name"],
+                            suite_name=f["suite_name"],
+                            component_name=f["component_name"],
+                            timestamp_value=f["timestamp_value"]
+                        ) for f in to_add_hashes
                     ]
                 )
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=[
-                        HashesLocations.c.sha256,
-                        HashesLocations.c.archive_name,
-                        HashesLocations.c.suite_name,
-                        HashesLocations.c.component_name
-                    ],
-                    set_=dict(
-                        timestamp_ranges=func.get_timestamps_ranges(HashesLocations.c.timestamp_ranges),
-                    )
-                )
-                session.execute(stmt)
+                session.commit()
+
+                logger.debug(f"Commit to 'hashes' (t-t0 = {int(time.time() - t0)} secondes)")
+                stmt_insert_new_hash = """
+                INSERT INTO hashes (sha256)
+                SELECT t.sha256 FROM temphashes t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_insert_new_hash)
+                session.commit()
+
+                logger.debug(f"Commit to 'hashes_locations' (t-t0 = {int(time.time() - t0)} secondes)")
+                stmt_insert_new_location_to_hash = """
+                INSERT INTO hashes_locations (sha256, archive_name, suite_name, component_name, timestamp_ranges)
+                SELECT t.sha256, t.archive_name, t.suite_name, t.component_name, ARRAY[ARRAY[t.timestamp_value, t.timestamp_value]]
+                FROM temphashes t
+                ON CONFLICT (sha256, archive_name, suite_name, component_name) DO UPDATE
+                SET timestamp_ranges = get_timestamps_ranges(hashes_locations.timestamp_ranges)
+                """
+                session.execute(stmt_insert_new_location_to_hash)
                 session.commit()
 
             if to_add_files:
-                logger.debug(f"Commit to DBfile: {len(to_add_files)}")
-                stmt = insert(DBfile).values(
+                # logger.debug(f"Commit to DBfile: {len(to_add_files)}")
+                # stmt = insert(DBfile).values(
+                #     [
+                #         {
+                #             "sha256": f["sha256"],
+                #             "size": f["size"],
+                #             "name": f["name"],
+                #             "path": f["path"]
+                #         } for f in to_add_files
+                #     ]
+                # )
+                # stmt = stmt.on_conflict_do_nothing()
+                # session.execute(stmt)
+                # session.commit()
+
+                logger.debug(f"Commit to 'tempfiles': {len(to_add_files)} (t-t0 = {int(time.time() - t0)} secondes)")
+                stmt = insert(DBtempfile).values(
                     [
                         {
                             "sha256": f["sha256"],
@@ -764,8 +815,18 @@ class SnapshotCli:
                 session.execute(stmt)
                 session.commit()
 
+                logger.debug(f"Commit to 'files' (t-t0 = {int(time.time() - t0)} secondes)")
+                stmt_insert_new_file = """
+                INSERT INTO files (sha256, name, size, path)
+                SELECT t.sha256, t.name, t.size, t.path
+                FROM tempfiles t
+                ON CONFLICT DO NOTHING
+                """
+                session.execute(stmt_insert_new_file)
+                session.commit()
+
             if to_add_srcpkg:
-                logger.debug(f"Commit to DBsrcpkg: {len(to_add_srcpkg)}")
+                logger.debug(f"Commit to 'srcpkg': {len(to_add_srcpkg)} (t-t0 = {int(time.time() - t0)} secondes)")
                 stmt = insert(DBsrcpkg).values(
                     [
                         {
@@ -792,7 +853,7 @@ class SnapshotCli:
                 session.commit()
 
             if to_add_binpkg:
-                logger.debug(f"Commit to DBbinpkg: {len(to_add_binpkg)}")
+                logger.debug(f"Commit to 'binpkg': {len(to_add_binpkg)} (t-t0 = {int(time.time() - t0)} secondes)")
                 stmt = insert(DBbinpkg).values(
                     [
                         {
@@ -821,6 +882,9 @@ class SnapshotCli:
 
         finally:
             session.close()
+            DBtemphash.__table__.drop()
+            DBtempfile.__table__.drop()
+            logger.debug(f"DB provisioned in: {int(time.time() - t0)} seconds")
 
     def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False, download_installer_files=True):
         """
@@ -829,7 +893,7 @@ class SnapshotCli:
         """
         os.makedirs(f"{self.localdir}/by-hash/SHA256", exist_ok=True)
         archives = set(self.archives).intersection(DEBIAN_ARCHIVES)
-        import time
+
         for archive in archives:
             timestamps = self.get_timestamps(archive)
             # we provision from past to now for timestamp_ranges array
@@ -841,12 +905,10 @@ class SnapshotCli:
                 # Download repository packages
                 poolfiles = self.download_poolfiles(archive, timestamp, self.suites, self.components, self.architectures, provision_db_only=provision_db_only)
 
-                t0 = time.time()
                 if not provision_db:
                     continue
                 self.provision_database(archive, timestamp, self.suites, self.components, self.architectures,
                                         poolfiles=poolfiles, ignore_provisioned=ignore_provisioned)
-                logger.debug(f"DB provisioned in: {int(time.time()-t0)} seconds")
 
     def run_qubes(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False):
         """
