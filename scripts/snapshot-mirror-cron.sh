@@ -15,7 +15,7 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
     /home/user/debian-snapshot/scripts/list-timestamps.py \
         > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     /home/user/debian-snapshot/snapshot.py "$SNAPSHOT_MOUNTPOINT" \
-        --debug --no-clean-part-file \
+        --debug \
         --archive debian --archive qubes-r4.1-vm \
         --suite unstable --suite bookworm --suite bullseye --suite buster \
         --arch amd64 --arch all --arch source \
