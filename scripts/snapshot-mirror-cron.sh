@@ -16,10 +16,16 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
         > "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     /home/user/debian-snapshot/snapshot.py "$SNAPSHOT_MOUNTPOINT" \
         --debug \
-        --archive debian --archive qubes-r4.1-vm \
-        --suite unstable --suite bookworm --suite bullseye --suite buster \
-        --arch amd64 --arch all --arch source \
-        --timestamp "${LOWER_TIMESTAMP}": \
+        --archive debian \
+        --archive qubes-r4.1-vm \
+        --suite unstable \
+        --suite bookworm \
+        --suite bullseye \
+        --suite buster \
+        --arch amd64 \
+        --arch all \
+        --arch source \
+        --timestamp "${LOWER_TIMESTAMP}:" \
         --provision-db \
         >> "/var/log/snapshot/${NOW_TIMESTAMP}.log" 2>&1
     xz "/var/log/snapshot/${NOW_TIMESTAMP}.log"
