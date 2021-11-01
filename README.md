@@ -46,7 +46,7 @@ optional arguments:
 1) Partial timestamps set for `debian` archive (default value), `unstable`, `bookworm` and `bullseye` suites, `amd64`, `all` and `source`
 architectures, `main` component (default value) since `20170101T000000Z` to local directory `/snapshot`:
 ```
-./snapshot.py /snapshot --debug --suite unstable --bookworm --suite bullseye --arch amd64 --arch all --arch source --timestamp 20170101T000000Z:
+./snapshot.py /snapshot --debug --suite unstable --suite bookworm --suite bullseye --arch amd64 --arch all --arch source --timestamp 20170101T000000Z:
 ```
 >Note: Pay attention to the ':'
 
