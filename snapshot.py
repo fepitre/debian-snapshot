@@ -375,8 +375,10 @@ class SnapshotCli:
         else:
             repodata_list = [
                 f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/binary-{arch}/Packages.gz",
-                f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}/Packages.gz"
             ]
+            installer_packages = f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}/{component}/debian-installer/binary-{arch}/Packages.gz"
+            if os.path.exists(installer_packages):
+                repodata_list.append(installer_packages)
         try:
             for repodata in repodata_list:
                 with open(repodata) as fd:
@@ -645,7 +647,7 @@ class SnapshotCli:
             if not result:
                 raise SnapshotException("No more URL to try")
 
-    def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False):
+    def run(self, check_only=False, no_clean=False, provision_db=False, provision_db_only=False, ignore_provisioned=False, download_installer_files=True):
         """
         Run the snapshot mirroring on all the archives, timestamps, suites,
         components and architectures
@@ -665,7 +667,8 @@ class SnapshotCli:
                             for arch in self.architectures:
                                 try:
                                     self.download_repodata(archive, timestamp, suite, component, arch)
-                                    self.download_installer(archive, timestamp, suite, component, arch)
+                                    if download_installer_files:
+                                        self.download_installer(archive, timestamp, suite, component, arch)
                                 except SnapshotRepodataNotFoundException:
                                     continue
                                 files.update(self.get_files(archive, timestamp, suite, component, arch))
@@ -730,7 +733,9 @@ class SnapshotCli:
 
 
 def get_args():
-    parser = argparse.ArgumentParser()
+    def formatter(prog):
+        return argparse.HelpFormatter(prog, max_help_position=100)
+    parser = argparse.ArgumentParser(formatter_class=formatter)
     parser.add_argument(
         "local_directory",
         help="Local directory for snapshot.")
@@ -797,6 +802,11 @@ def get_args():
         help="No clean partially downloaded files.",
     )
     parser.add_argument(
+        "--skip-installer-files",
+        action="store_true",
+        help="Skip download of installer files.",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Display logger info messages.",
@@ -847,7 +857,8 @@ def main():
             no_clean=args.no_clean_part_file,
             provision_db=args.provision_db,
             provision_db_only=args.provision_db_only,
-            ignore_provisioned=args.ignore_provisioned
+            ignore_provisioned=args.ignore_provisioned,
+            download_installer_files=not args.skip_installer_files
         )
         # QubesOS: deb.qubes-os.org/all-versions
         cli.run_qubes(

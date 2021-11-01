@@ -12,33 +12,30 @@ It currently uses `snapshot.debian.org` set of timestamps and data for provision
 ## Snapshot repositories
 
 ```
-usage: snapshot.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH] [--timestamp TIMESTAMP]
-                   [--check-only] [--provision-db] [--provision-db-only] [--ignore-provisioned] [--no-clean-part-file] [--verbose]
-                   [--debug]
+usage: snapshot.py [-h] [--archive ARCHIVE] [--suite SUITE] [--component COMPONENT] [--arch ARCH] [--timestamp TIMESTAMP] [--check-only] [--provision-db]
+                   [--provision-db-only] [--ignore-provisioned] [--no-clean-part-file] [--skip-installer-files] [--verbose] [--debug]
                    local_directory
 
 positional arguments:
-  local_directory       Local directory for snapshot.
+  local_directory         Local directory for snapshot.
 
 optional arguments:
-  -h, --help            show this help message and exit
-  --archive ARCHIVE     Debian archive to snapshot. Default is 'debian' and is the only supported archive right now.
-  --suite SUITE         Debian suite to snapshot. Can be used multiple times. Default is 'unstable'
-  --component COMPONENT
-                        Debian component to snapshot. Default is 'main'
-  --arch ARCH           Debian arch to snapshot. Can be used multiple times.
-  --timestamp TIMESTAMP
-                        Timestamp to use for snapshot. Can be used multiple times. Default is all the available timestamps.
-                        Timestamps range can be expressed with ':' separator. Empty boundary is allowed and and this case, it would
-                        use the lower or upper value in all the available timestamps. For example:
-                        '20200101T000000Z:20210315T085036Z', '20200101T000000Z:' or ':20100101T000000Z'.
-  --check-only          Check downloaded files only.
-  --provision-db        Provision database.
-  --provision-db-only   Provision database only.
-  --ignore-provisioned  Ignore already provisioned repodata.
-  --no-clean-part-file  No clean partially downloaded files.
-  --verbose             Display logger info messages.
-  --debug               Display logger debug messages.
+  -h, --help              show this help message and exit
+  --archive ARCHIVE       Debian archive to snapshot. Default is 'debian' and is the only supported archive right now.
+  --suite SUITE           Debian suite to snapshot. Can be used multiple times. Default is 'unstable'
+  --component COMPONENT   Debian component to snapshot. Default is 'main'
+  --arch ARCH             Debian arch to snapshot. Can be used multiple times.
+  --timestamp TIMESTAMP   Timestamp to use for snapshot. Can be used multiple times. Default is all the available timestamps. Timestamps range can be expressed with
+                          ':' separator. Empty boundary is allowed and and this case, it would use the lower or upper value in all the available timestamps. For
+                          example: '20200101T000000Z:20210315T085036Z', '20200101T000000Z:' or ':20100101T000000Z'.
+  --check-only            Check downloaded files only.
+  --provision-db          Provision database.
+  --provision-db-only     Provision database only.
+  --ignore-provisioned    Ignore already provisioned repodata.
+  --no-clean-part-file    No clean partially downloaded files.
+  --skip-installer-files  Skip download of installer files.
+  --verbose               Display logger info messages.
+  --debug                 Display logger debug messages.
 ```
 
 ### Examples
