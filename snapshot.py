@@ -528,7 +528,8 @@ class SnapshotCli:
         """
         base_url = f"archive/{archive}/{timestamp}/dists/{suite}/{component}/i18n"
         translation_files = [
-            "Translation-en.bz2"
+            "Translation-en.bz2",
+            "Translation-en.xz"
         ]
         hashes = self.get_hashes_from_page(f"{SNAPSHOT_DEBIAN}/{base_url}")
         for f in translation_files:
