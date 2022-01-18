@@ -499,6 +499,12 @@ class SnapshotCli:
             os.remove(localfile)
         self.download(localfile, remotefile)
 
+        # Create sid symlink
+        if suite == "unstable":
+            if not os.path.exists(f"{self.localdir}/archive/{archive}/{timestamp}/dists/sid"):
+                os.symlink(f"{self.localdir}/archive/{archive}/{timestamp}/dists/{suite}",
+                           f"{self.localdir}/archive/{archive}/{timestamp}/dists/sid")
+
     def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
         """
         Download repository Release files and translation
