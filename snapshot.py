@@ -507,11 +507,14 @@ class SnapshotCli:
 
     def download_release(self, archive, timestamp, suite, component, arch, baseurl=SNAPSHOT_DEBIAN, force=False):
         """
-        Download repository Release files and translation
+        Download repository files and translation
         """
+        metadata_files = [
+            f"/archive/{archive}/{timestamp}/dists/{suite}/{component}/Contents-{arch}.gz"
+        ]
         if arch != "source":
             arch = f"binary-{arch}"
-        metadata_files = [
+        metadata_files += [
             f"/archive/{archive}/{timestamp}/dists/{suite}/Release",
             f"/archive/{archive}/{timestamp}/dists/{suite}/Release.gpg",
             f"/archive/{archive}/{timestamp}/dists/{suite}/InRelease",
