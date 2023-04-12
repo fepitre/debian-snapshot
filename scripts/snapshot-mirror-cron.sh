@@ -22,6 +22,8 @@ if mountpoint -q "$SNAPSHOT_MOUNTPOINT"; then
         --suite bookworm \
         --suite bullseye \
         --suite buster \
+        --component main \
+        --component non-free-firmware \
         --arch amd64 \
         --arch all \
         --arch source \
